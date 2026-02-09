@@ -16,19 +16,18 @@ Future<void> main() async {
 
   try {
     if (kIsWeb) {
-      // Cấu hình Firebase cho Web
       await Firebase.initializeApp(
         options: const FirebaseOptions(
-          apiKey: "AIzaSy...", 
-          appId: "1:...",
-          messagingSenderId: "...",
-          projectId: "...",
-          authDomain: "vinhuni-portal.firebaseapp.com",
-          storageBucket: "vinhuni-portal.appspot.com",
+          apiKey: "AIzaSyDXTIJfevodiYzPDjLeyRl8zxMLwOqoRa4",
+          authDomain: "vinhuni-portal-student.firebaseapp.com",
+          projectId: "vinhuni-portal-student",
+          storageBucket: "vinhuni-portal-student.firebasestorage.app",
+          messagingSenderId: "306901265797",
+          appId: "1:306901265797:web:8082983e0b0bf5462268ec",
+          measurementId: "G-3V0DQPY80W"
         ),
       );
     } else {
-      // Cấu hình Firebase cho Android/iOS
       await Firebase.initializeApp();
     }
     print("✅ Firebase initialized successfully");
@@ -81,14 +80,17 @@ class _HomeScreenState extends State<HomeScreen> {
     _initializeAuth(); 
   }
 
-  // --- HỆ THỐNG XÁC THỰC & FIREBASE ---
+  // --- HỆ THỐNG XÁC THỰC & ĐỒNG BỘ TOKEN ---
   Future<void> _initializeAuth() async {
     final prefs = await SharedPreferences.getInstance();
     final savedId = prefs.getString('user_id'); 
+    
     if (savedId != null && savedId.isNotEmpty) {
       if (!kIsWeb) {
+        // 1. Đăng ký nhóm chung
         await FirebaseMessaging.instance.subscribeToTopic("vinhuni_all_students");
-        print("🚀 Đã đăng ký nhóm trên Mobile");
+        // 2. Cập nhật Token cá nhân về SQL Server
+        await _updateFCMToken(savedId);
       }
       if (mounted) {
         setState(() { studentId = savedId; _isAuthChecked = true; });
@@ -96,6 +98,28 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } else {
       if (mounted) setState(() => _isAuthChecked = true);
+    }
+  }
+
+  // Hàm gửi Token về Backend Python để lưu vào tbl_FCM_Tokens
+  Future<void> _updateFCMToken(String sId) async {
+    try {
+      String? token = await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+        final response = await http.post(
+          Uri.parse("$domain/save-fcm-token"),
+          headers: {"Content-Type": "application/json"},
+          body: jsonEncode({
+            "student_id": sId,
+            "token": token,
+          }),
+        );
+        if (response.statusCode == 200) {
+          debugPrint("✅ FCM Token đã được đồng bộ về SQL Server");
+        }
+      }
+    } catch (e) {
+      debugPrint("❌ Lỗi đồng bộ Token: $e");
     }
   }
 
@@ -107,12 +131,17 @@ class _HomeScreenState extends State<HomeScreen> {
         Uri.parse("https://mobi.vinhuni.edu.vn/login"),
         body: {'username': _userController.text, 'password': _passController.text},
       );
+      
       if (response.statusCode == 200 || response.request?.url.path.contains('mobile') == true) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('user_id', _userController.text);
+        
         if (!kIsWeb) {
+          // Đăng ký Topic và Lưu Token ngay khi đăng nhập
           await FirebaseMessaging.instance.subscribeToTopic("vinhuni_all_students");
+          await _updateFCMToken(_userController.text);
         }
+
         if (mounted) {
           setState(() { studentId = _userController.text; _isLoading = false; });
           _loadFilters();
@@ -120,15 +149,18 @@ class _HomeScreenState extends State<HomeScreen> {
       } else {
         _showError("Thông tin đăng nhập không chính xác");
       }
-    } catch (e) { _showError("Lỗi kết nối máy chủ"); }
-    finally { if (mounted) setState(() => _isLoading = false); }
+    } catch (e) { 
+      _showError("Lỗi kết nối máy chủ"); 
+    } finally { 
+      if (mounted) setState(() => _isLoading = false); 
+    }
   }
 
   void _showError(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
   }
 
-  // --- HỆ THỐNG CẬP NHẬT BỘ LỌC 3 CẤP ---
+  // --- HỆ THỐNG BỘ LỌC DỮ LIỆU ---
   Future<void> _loadFilters() async {
     if (studentId == null) return;
     try {
@@ -216,11 +248,10 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // Chỉ hiện FilterBar cho Lịch học (1), Lịch thi (2), Điểm (3)
           if (_currentIndex > 0 && _currentIndex < 4) _buildFilterBar(), 
           Expanded(
             child: _currentIndex == 4 
-              ? ChatScreen(studentId: studentId!) // Tab Hỏi đáp
+              ? ChatScreen(studentId: studentId!) 
               : FutureBuilder<List<dynamic>>(
                   key: ValueKey("$_currentIndex$selectedYear$selectedSemester$selectedWeek"),
                   future: fetchData(),
@@ -319,7 +350,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 10),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(item['TenHocPhan'] ?? "Chi tiết", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFF0056b3)), textAlign: TextAlign.center),
+              child: Text(item['TenHocPhan'] ?? item['TieuDe'] ?? "Chi tiết", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFF0056b3)), textAlign: TextAlign.center),
             ),
             const Divider(height: 30),
             Expanded(
