@@ -3,8 +3,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// Import các màn hình chức năng
-// Đảm bảo đường dẫn import đúng với dự án của bạn
+// Import các màn hình chức năng (Đảm bảo các file này tồn tại trong project của bạn)
 import 'chat_screen.dart';
 import 'thongbao_screen.dart';
 import 'profile_screen.dart';
@@ -20,13 +19,16 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  // Cấu hình màu sắc VinhUni rực rỡ
   final Color vinhUniBlue = const Color(0xFF0054A6);
+  final Color activeColor = const Color(0xFF0078D4);
+  final Color inactiveColor = const Color(0xFF94A3B8);
+
   int _currentIndex = 0;
   bool _hasUnread = false;
-  
-  // --- KHAI BÁO BIẾN Ở ĐÂY LÀ ĐÚNG (Trong State) ---
-  String studentName = "Sinh viên";
-  String studentId = ""; 
+  String studentName = "Đang tải...";
+  String studentId = "";
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
   void initState() {
@@ -35,20 +37,21 @@ class _HomeScreenState extends State<HomeScreen> {
     _checkUnreadNotifications();
   }
 
+  // 1. Tải thông tin sinh viên từ SharedPreferences
   Future<void> _loadStudentInfo() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
       setState(() {
+        studentId = prefs.getString('user_id') ?? "";
         studentName = prefs.getString('full_name') ??
             prefs.getString('user_name') ??
             prefs.getString('user_id') ?? "Sinh viên";
-            
-        // Lấy ID sinh viên để load ảnh Avatar
-        studentId = prefs.getString('user_id') ?? ""; 
       });
+      debugPrint("✅ Đã nạp thông tin SV: $studentName ($studentId)");
     }
   }
 
+  // 2. Kiểm tra thông báo chưa đọc từ API
   Future<void> _checkUnreadNotifications() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -64,217 +67,195 @@ class _HomeScreenState extends State<HomeScreen> {
         if (mounted) setState(() => _hasUnread = unread);
       }
     } catch (e) {
-      debugPrint("Lỗi check badge: $e");
+      debugPrint("⚠️ Lỗi check badge: $e");
     }
+  }
+
+  // 3. Xử lý Đăng xuất
+  Future<void> _logout(BuildContext context) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    if (mounted) Navigator.pushReplacementNamed(context, '/');
   }
 
   @override
   Widget build(BuildContext context) {
-    // Danh sách màn hình
+    // Danh sách màn hình cho BottomBar
     final List<Widget> screens = [
-      // Truyền studentId xuống HomeContent
-      HomeContent(studentName: studentName, studentId: studentId),
+      HomeContent(
+        studentName: studentName,
+        studentId: studentId,
+        onAvatarTap: () => setState(() => _currentIndex = 3),
+      ),
       const ThongBaoScreen(),
       const ChatScreen(),
       const ProfileScreen(),
     ];
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
+      key: _scaffoldKey,
+      backgroundColor: const Color(0xFFF8FAFC),
+      
+      // ✅ MENU 3 GẠCH (DRAWER)
+      drawer: _buildModernDrawer(context),
+
       body: IndexedStack(
         index: _currentIndex,
         children: screens,
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 20,
-              offset: const Offset(0, -5),
-            ),
-          ],
-        ),
+
+      // ✅ BOTTOM BAR THIẾT KẾ MỚI
+      bottomNavigationBar: _buildModernBottomBar(),
+    );
+  }
+
+  Widget _buildModernBottomBar() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: const BorderRadius.only(topLeft: Radius.circular(25), topRight: Radius.circular(25)),
+        boxShadow: [BoxShadow(color: vinhUniBlue.withOpacity(0.1), blurRadius: 20, offset: const Offset(0, -5))],
+      ),
+      child: ClipRRect(
+        borderRadius: const BorderRadius.only(topLeft: Radius.circular(25), topRight: Radius.circular(25)),
         child: BottomNavigationBar(
           type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.white,
-          elevation: 0,
-          selectedItemColor: vinhUniBlue,
-          unselectedItemColor: Colors.grey[400],
-          selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
           currentIndex: _currentIndex,
+          selectedItemColor: activeColor,
+          unselectedItemColor: inactiveColor,
+          selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 11),
           onTap: (index) {
-            setState(() => _currentIndex = index);
-            if (index == 1) {
-              setState(() => _hasUnread = false);
+            if (index == 4) {
+              _scaffoldKey.currentState?.openDrawer();
             } else {
-              _checkUnreadNotifications();
+              setState(() => _currentIndex = index);
+              if (index == 1) setState(() => _hasUnread = false);
             }
           },
           items: [
-            const BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: "Trang chủ"),
+            const BottomNavigationBarItem(icon: Icon(Icons.grid_view_rounded), label: "Trang chủ"),
             BottomNavigationBarItem(
               icon: Stack(
-                clipBehavior: Clip.none,
                 children: [
-                  const Icon(Icons.notifications_rounded),
+                  const Icon(Icons.notifications_active_rounded),
                   if (_hasUnread)
-                    Positioned(
-                      right: -2, top: -2,
-                      child: Container(
-                        width: 10, height: 10,
-                        decoration: BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 1.5),
-                        ),
-                      ),
-                    )
+                    Positioned(right: 0, top: 0, child: Container(width: 8, height: 8, decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle))),
                 ],
               ),
               label: "Thông báo",
             ),
             const BottomNavigationBarItem(icon: Icon(Icons.smart_toy_rounded), label: "Trợ lý AI"),
-            const BottomNavigationBarItem(icon: Icon(Icons.person_rounded), label: "Cá nhân"),
+            const BottomNavigationBarItem(icon: Icon(Icons.account_circle_rounded), label: "Cá nhân"),
+            const BottomNavigationBarItem(icon: Icon(Icons.menu_open_rounded), label: "Menu"),
           ],
         ),
       ),
     );
   }
+
+  Widget _buildModernDrawer(BuildContext context) {
+    return Drawer(
+      child: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.only(top: 60, bottom: 30, left: 20),
+            decoration: BoxDecoration(gradient: LinearGradient(colors: [vinhUniBlue, activeColor])),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  radius: 35, backgroundColor: Colors.white,
+                  backgroundImage: (studentId.isNotEmpty) ? NetworkImage('https://mobi.vinhuni.edu.vn/api/get-avatar/$studentId') : null,
+                  child: studentId.isEmpty ? const Icon(Icons.person, size: 35) : null,
+                ),
+                const SizedBox(height: 12),
+                Text(studentName, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                Text("Mã SV: $studentId", style: TextStyle(color: Colors.white.withOpacity(0.8))),
+              ],
+            ),
+          ),
+          _buildDrawerItem(Icons.person_outline, "Thông tin chi tiết", () { Navigator.pop(context); setState(() => _currentIndex = 3); }),
+          _buildDrawerItem(Icons.lock_outline, "Đổi mật khẩu", () => Navigator.pop(context)),
+          const Spacer(),
+          const Divider(),
+          _buildDrawerItem(Icons.logout, "Đăng xuất", () => _logout(context), color: Colors.red),
+          const SizedBox(height: 30),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrawerItem(IconData icon, String title, VoidCallback onTap, {Color? color}) {
+    return ListTile(leading: Icon(icon, color: color ?? vinhUniBlue), title: Text(title, style: TextStyle(color: color)), onTap: onTap);
+  }
 }
 
-// === GIAO DIỆN HOME CONTENT (Header cong + Avatar) ===
+// === WIDGET NỘI DUNG TRANG CHỦ ===
 class HomeContent extends StatelessWidget {
   final String studentName;
-  final String studentId; // Nhận biến ID từ State
+  final String studentId;
+  final VoidCallback? onAvatarTap;
 
-  const HomeContent({
-    super.key, 
-    required this.studentName, 
-    required this.studentId
-  });
+  const HomeContent({super.key, required this.studentName, required this.studentId, this.onAvatarTap});
 
   final Color vinhUniBlue = const Color(0xFF0054A6);
 
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
+      // ✅ FIX LỖI KHUẤT: Tạo khoảng trống 120px dưới cùng
+      padding: const EdgeInsets.only(bottom: 120),
       child: Column(
         children: [
           _buildHeader(context),
-          const SizedBox(height: 20),
+          _buildStatisticCard(),
+          const SizedBox(height: 10),
           _buildFeatureGrid(context),
           const SizedBox(height: 25),
           _buildNewsSection(),
-          const SizedBox(height: 100), 
         ],
       ),
     );
   }
 
-  // 1. HEADER CONG + AVATAR (Đã sửa logic ảnh)
+  // 1. Header màu xanh với Avatar nhấn được
   Widget _buildHeader(BuildContext context) {
     return Stack(
       children: [
         Container(
-          height: 200,
+          height: 180,
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [vinhUniBlue, const Color(0xFF0078D4)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: const BorderRadius.only(
-              bottomLeft: Radius.circular(30),
-              bottomRight: Radius.circular(30),
-            ),
-            boxShadow: [
-              BoxShadow(color: vinhUniBlue.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 10))
-            ],
+            gradient: LinearGradient(colors: [vinhUniBlue, const Color(0xFF0078D4)]),
+            borderRadius: const BorderRadius.only(bottomLeft: Radius.circular(30), bottomRight: Radius.circular(30)),
           ),
         ),
         SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(20.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text("Xin chào,", style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 14)),
-                          const SizedBox(height: 4),
-                          Text(
-                            studentName.toUpperCase(),
-                            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                            maxLines: 1, overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                    // --- AVATAR ---
-                    Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.3),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white.withOpacity(0.5), width: 1),
-                      ),
-                      child: CircleAvatar(
-                        radius: 26,
-                        backgroundColor: Colors.white,
-                        // ✅ SỬA LỖI TẠI ĐÂY: Chỉ gán ảnh khi studentId có dữ liệu
-                        backgroundImage: (studentId.isNotEmpty) 
-                            ? NetworkImage('https://mobi.vinhuni.edu.vn/api/get-avatar/$studentId')
-                            : null,
-                        
-                        // ✅ SỬA LỖI TẠI ĐÂY: Hàm xử lý lỗi cũng phải là null nếu không có ảnh
-                        onBackgroundImageError: (studentId.isNotEmpty) 
-                            ? (exception, stackTrace) {
-                                debugPrint("Lỗi tải ảnh avatar: $exception");
-                              }
-                            : null,
-
-                        // ✅ HIỂN THỊ ICON MẶC ĐỊNH: Nếu không có ID hoặc khi đang đợi tải ảnh
-                        child: (studentId.isEmpty) 
-                            ? const Icon(Icons.person, color: Colors.grey, size: 30) 
-                            : null,
-                      ),
-                    )
-                  ],
-                ),
-                const SizedBox(height: 25),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.white.withOpacity(0.2)),
-                  ),
-                  child: Row(
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle),
-                        child: const Icon(Icons.school_rounded, color: Colors.white, size: 20),
-                      ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Text(
-                          "Học kỳ 2 năm học 2025-2026 đã bắt đầu!",
-                          style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-                          maxLines: 1, overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      Icon(Icons.arrow_forward_ios_rounded, color: Colors.white.withOpacity(0.7), size: 14),
+                      const Text("Xin chào,", style: TextStyle(color: Colors.white70, fontSize: 14)),
+                      Text(studentName.toUpperCase(), 
+                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
                     ],
                   ),
-                )
+                ),
+                GestureDetector(
+                  onTap: onAvatarTap,
+                  child: CircleAvatar(
+                    radius: 26, backgroundColor: Colors.white,
+                    backgroundImage: (studentId.isNotEmpty) ? NetworkImage('https://mobi.vinhuni.edu.vn/api/get-avatar/$studentId') : null,
+                    child: studentId.isEmpty ? const Icon(Icons.person) : null,
+                  ),
+                ),
               ],
             ),
           ),
@@ -283,37 +264,59 @@ class HomeContent extends StatelessWidget {
     );
   }
 
-  // 2. GRID CHỨC NĂNG
+  // 2. Thẻ thống kê (Hồ sơ, Đang xét, Đã đạt)
+  Widget _buildStatisticCard() {
+    return Transform.translate(
+      offset: const Offset(0, -30),
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 20),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 15, offset: const Offset(0, 5))],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _buildStatItem(Icons.article_outlined, "0", "Thông báo mới", Colors.green),
+            _buildStatItem(Icons.pending_actions, "0", "Số môn có điểm", Colors.orange),
+            _buildStatItem(Icons.task_alt, "0", "Số dư TK", Colors.blue),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatItem(IconData icon, String val, String label, Color color) {
+    return Column(children: [
+      Icon(icon, color: color, size: 24),
+      const SizedBox(height: 5),
+      Text(val, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+      Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+    ]);
+  }
+
+  // 3. Lưới tính năng (8 Icon)
   Widget _buildFeatureGrid(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("Tiện ích sinh viên", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+          const Text("Chức năng chính", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 15),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          GridView.count(
+            shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 4, mainAxisSpacing: 20, crossAxisSpacing: 10, childAspectRatio: 0.85,
             children: [
-              _buildFeatureItem(context, "Lịch học", Icons.calendar_month_rounded, const Color(0xFFE3F2FD), const Color(0xFF1976D2), 
-                  () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ThoiKhoaBieuScreen()))),
-              _buildFeatureItem(context, "Lịch thi", Icons.assignment_late_rounded, const Color(0xFFFFF3E0), const Color(0xFFF57C00), 
-                  () => Navigator.push(context, MaterialPageRoute(builder: (context) => const LichThiScreen()))),
-              _buildFeatureItem(context, "Kết quả", Icons.pie_chart_rounded, const Color(0xFFE8F5E9), const Color(0xFF388E3C), 
-                  () => Navigator.push(context, MaterialPageRoute(builder: (context) => const DiemThiScreen()))),
-              _buildFeatureItem(context, "Học phí", Icons.account_balance_wallet_rounded, const Color(0xFFF3E5F5), const Color(0xFF7B1FA2), 
-                  () => _showComingSoon(context)),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.start,
-            children: [
-              _buildFeatureItem(context, "Dịch vụ", Icons.dataset_linked_outlined, const Color(0xFFFFEBEE), const Color(0xFFD32F2F), 
-                  () => _showComingSoon(context)),
-              const SizedBox(width: 25),
-              _buildFeatureItem(context, "Khảo sát", Icons.poll_rounded, const Color(0xFFE0F7FA), const Color(0xFF0097A7), 
-                  () => _showComingSoon(context)),
+              _buildFeatureItem(context, "Lịch học", Icons.event_note, Colors.blue, const ThoiKhoaBieuScreen()),
+              _buildFeatureItem(context, "Lịch thi", Icons.assignment, Colors.orange, const LichThiScreen()),
+              _buildFeatureItem(context, "Kết quả", Icons.bar_chart, Colors.green, const DiemThiScreen()),
+              _buildFeatureItem(context, "Học phí", Icons.account_balance_wallet, Colors.purple, null),
+              _buildFeatureItem(context, "Dịch vụ", Icons.apps, Colors.red, null),
+              _buildFeatureItem(context, "Khảo sát", Icons.thumbs_up_down, Colors.teal, null),
+              _buildFeatureItem(context, "Tra cứu", Icons.search, Colors.indigo, null),
+              _buildFeatureItem(context, "Liên hệ", Icons.contact_support, Colors.pink, null),
             ],
           ),
         ],
@@ -321,60 +324,39 @@ class HomeContent extends StatelessWidget {
     );
   }
 
-  Widget _buildFeatureItem(BuildContext context, String title, IconData icon, Color bg, Color iconColor, VoidCallback onTap) {
+  Widget _buildFeatureItem(BuildContext context, String title, IconData icon, Color color, Widget? target) {
     return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        children: [
-          Container(
-            height: 60, width: 60,
-            decoration: BoxDecoration(
-              color: bg, borderRadius: BorderRadius.circular(18),
-              boxShadow: [BoxShadow(color: bg.withOpacity(0.5), blurRadius: 8, offset: const Offset(0, 4))],
-            ),
-            child: Icon(icon, color: iconColor, size: 28),
-          ),
-          const SizedBox(height: 8),
-          Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87)),
-        ],
-      ),
+      onTap: () => target != null ? Navigator.push(context, MaterialPageRoute(builder: (_) => target)) : null,
+      child: Column(children: [
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(15)),
+          child: Icon(icon, color: color, size: 26),
+        ),
+        const SizedBox(height: 8),
+        Text(title, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
+      ]),
     );
   }
 
-  // 3. TIN TỨC / KHÁM PHÁ (Giao diện Magazine Pro)
+  // 4. Mục Tin tức nổi bật
   Widget _buildNewsSection() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text("Khám phá VinhUni", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.black87)),
-                  SizedBox(height: 4),
-                  Text("Tin tức & Hoạt động nổi bật", style: TextStyle(fontSize: 12, color: Colors.grey)),
-                ],
-              ),
-              Text("Xem tất cả", style: TextStyle(fontSize: 12, color: vinhUniBlue, fontWeight: FontWeight.bold)),
-            ],
-          ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20),
+          child: Text("Khám phá VinhUni", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 15),
         SizedBox(
-          height: 180,
+          height: 160,
           child: ListView(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.only(left: 20, right: 10),
+            scrollDirection: Axis.horizontal, padding: const EdgeInsets.only(left: 20, right: 10),
             children: [
-              _buildModernNewsCard("Thư viện số", "Truy cập hàng ngàn giáo trình online miễn phí.", Icons.auto_stories_rounded, [const Color(0xFF0054A6), const Color(0xFF009688)]),
-              _buildModernNewsCard("Ký túc xá", "Đăng ký phòng & thanh toán trực tuyến.", Icons.apartment_rounded, [const Color(0xFFFF512F), const Color(0xFFDD2476)]),
-              _buildModernNewsCard("CLB Sinh viên", "Tham gia 50+ CLB năng động tại trường.", Icons.groups_3_rounded, [const Color(0xFF4776E6), const Color(0xFF8E54E9)]),
+              _buildNewsCard("Thư viện số", "Truy cập tài liệu online", Icons.auto_stories, Colors.blue),
+              _buildNewsCard("Ký túc xá", "Đăng ký chỗ ở trực tuyến", Icons.apartment, Colors.pink),
+              _buildNewsCard("Hoạt động", "Các CLB đang tuyển quân", Icons.groups, Colors.orange),
             ],
           ),
         ),
@@ -382,50 +364,25 @@ class HomeContent extends StatelessWidget {
     );
   }
 
-  Widget _buildModernNewsCard(String title, String subtitle, IconData icon, List<Color> gradientColors) {
+  Widget _buildNewsCard(String title, String desc, IconData icon, Color color) {
     return Container(
-      width: 260,
-      margin: const EdgeInsets.only(right: 15, bottom: 10),
+      width: 240, margin: const EdgeInsets.only(right: 15),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
+        gradient: LinearGradient(colors: [color, color.withOpacity(0.7)]),
         borderRadius: BorderRadius.circular(24),
-        boxShadow: [BoxShadow(color: gradientColors[0].withOpacity(0.3), blurRadius: 12, offset: const Offset(0, 6))],
-        gradient: LinearGradient(colors: gradientColors, begin: Alignment.topLeft, end: Alignment.bottomRight),
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(24),
-        child: Stack(
-          children: [
-            Positioned(right: -20, top: -20, child: Container(width: 100, height: 100, decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), shape: BoxShape.circle))),
-            Positioned(right: -40, bottom: -40, child: Container(width: 150, height: 150, decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), shape: BoxShape.circle))),
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), borderRadius: BorderRadius.circular(14), border: Border.all(color: Colors.white.withOpacity(0.3))),
-                    child: Icon(icon, color: Colors.white, size: 24),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: 0.5)),
-                      const SizedBox(height: 6),
-                      Text(subtitle, style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 12, height: 1.4), maxLines: 2, overflow: TextOverflow.ellipsis),
-                    ],
-                  )
-                ],
-              ),
-            )
-          ],
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Icon(icon, color: Colors.white, size: 30),
+          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+            Text(desc, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+          ]),
+        ],
       ),
     );
-  }
-
-  void _showComingSoon(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Tính năng đang phát triển")));
   }
 }
