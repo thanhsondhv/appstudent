@@ -200,17 +200,22 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
         
         // --- LOGIC TÁCH DỮ LIỆU TỪ JSON BACKEND ---
         String getVal(String key) {
-          final parts = rawInfo.split('|');
-          for (var p in parts) {
-            if (p.contains(key)) return p.split(':')[1].trim();
-          }
-          return "---";
-        }
+		  // Dùng split('|') để tách các cặp "Key: Value"
+		  final parts = rawInfo.split('|');
+		  for (var p in parts) {
+			if (p.contains(key)) {
+			  final valuePart = p.split(':');
+			  if (valuePart.length > 1) return valuePart[1].trim();
+			}
+		  }
+		  return "---";
+		}
 
         final cc = getVal("CC");
-        final gk = getVal("GK");
-        final thi = getVal("Thi");
-        final he4 = getVal("Hệ 4");
+		final gk = getVal("GK");
+		final thi = getVal("Thi");
+		final he4 = getVal("Hệ 4");
+		
         
         // Lấy điểm hệ 10 và điểm chữ từ chuỗi "Tổng kết: 8.5 (A)"
         final String summary = item['NgayThi'] ?? "";
