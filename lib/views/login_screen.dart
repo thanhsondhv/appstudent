@@ -93,7 +93,7 @@ class _LogInWidgetState extends State<LogInWidget> with SingleTickerProviderStat
         debugPrint("✅ Office 365 Login Success: ID=$userId, Name=$name");
         
         // Gọi hàm thực thi đăng nhập thành công (Lưu session, chuyển trang Home)
-        await _executeSuccessfulLogin(userId, name ?? "Sinh viên");
+        await _executeSuccessfulLogin(userId, name ?? "Sinh viên1");
       }
     }
   }
@@ -118,15 +118,36 @@ class _LogInWidgetState extends State<LogInWidget> with SingleTickerProviderStat
 
   // Hàm dùng chung để xử lý sau khi đăng nhập thành công (cho cả 2 phương thức)
   Future<void> _executeSuccessfulLogin(String userId, String fullName) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_id', userId);
-    await prefs.setString('full_name', fullName);
+    // Kiểm tra dữ liệu đầu vào trước khi lưu
+    debugPrint("🚀 --- TIẾN TRÌNH LƯU ĐĂNG NHẬP ---");
+    debugPrint("📍 Mã SV: $userId");
+    debugPrint("📍 Họ tên: $fullName");
 
-    await _handleNotificationTopic(true);
-    await NotificationService().syncTokenToServer(userId);
+    try {
+      final prefs = await SharedPreferences.getInstance();
 
-    if (mounted) {
-      Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+      // 1. Lưu ID sinh viên
+      await prefs.setString('user_id', userId);
+
+      // 2. Lưu Họ tên sinh viên (Dùng khóa 'full_name' để khớp với HomeScreen)
+      // Nếu fullName bị rỗng hoặc null, sẽ dự phòng bằng "Sinh viên VinhUni"
+      String finalName = (fullName.trim().isEmpty) ? "Sinh viên VinhUni" : fullName;
+      await prefs.setString('full_name', finalName);
+
+      debugPrint("✅ Đã ghi vào máy: ID=$userId, Name=$finalName");
+
+      // 3. Thiết lập thông báo (Firebase Cloud Messaging)
+      await _handleNotificationTopic(true);
+      await NotificationService().syncTokenToServer(userId);
+
+      // 4. Chuyển hướng vào trang Home
+      if (mounted) {
+        debugPrint("➡️ Đang chuyển hướng vào trang chủ...");
+        Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+      }
+    } catch (e) {
+      debugPrint("❌ Lỗi khi thực hiện lưu đăng nhập: $e");
+      _showErrorSnackBar("Không thể lưu thông tin phiên đăng nhập.");
     }
   }
 
@@ -168,29 +189,37 @@ class _LogInWidgetState extends State<LogInWidget> with SingleTickerProviderStat
     }
   }
 
-  void _handleLogin() async {
-    if (emailController.text.isEmpty || passwordController.text.isEmpty) {
-      _showErrorSnackBar("Vui lòng nhập đầy đủ tài khoản và mật khẩu!");
-      return;
-    }
+  // Trong màn hình login_screen.dart, tại hàm _handleLogin:
 
-    setState(() => _isLoading = true);
-
-    bool isSuccess = await AuthService().login(
-      emailController.text.trim(),
-      passwordController.text.trim(),
-    );
-
-    if (mounted) setState(() => _isLoading = false);
-
-    if (isSuccess) {
-      final userId = emailController.text.trim();
-      await _saveAccountInfo();
-      await _executeSuccessfulLogin(userId, "Sinh viên");
-    } else {
-      _showErrorSnackBar("Thông tin đăng nhập không chính xác!");
-    }
+void _handleLogin() async {
+  if (emailController.text.isEmpty || passwordController.text.isEmpty) {
+    _showErrorSnackBar("Vui lòng nhập đầy đủ tài khoản và mật khẩu!");
+    return;
   }
+
+  setState(() => _isLoading = true);
+
+  // userData bây giờ sẽ là một Map (chứa thông tin) hoặc null
+  final userData = await AuthService().login(
+    emailController.text.trim(),
+    passwordController.text.trim(),
+  );
+
+  if (mounted) setState(() => _isLoading = false);
+
+  if (userData != null) {
+    // ĐÃ HẾT LỖI: Vì userData bây giờ là Map nên dùng được dấu []
+    final userId = userData['student_id'].toString();
+    final fullName = userData['full_name'] ?? "Sinh viên VinhUni";
+
+    await _saveAccountInfo();
+    
+    // Gửi tên thật vào hàm lưu để không bị hiện chữ "SINH VIÊN"
+    await _executeSuccessfulLogin(userId, fullName); 
+  } else {
+    _showErrorSnackBar("Thông tin đăng nhập không chính xác!");
+  }
+}
 
   void _showErrorSnackBar(String message) {
     if (mounted) {

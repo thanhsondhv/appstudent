@@ -39,17 +39,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // 1. Tải thông tin sinh viên từ SharedPreferences
   Future<void> _loadStudentInfo() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (mounted) {
-      setState(() {
-        studentId = prefs.getString('user_id') ?? "";
-        studentName = prefs.getString('full_name') ??
-            prefs.getString('user_name') ??
-            prefs.getString('user_id') ?? "Sinh viên";
-      });
-      debugPrint("✅ Đã nạp thông tin SV: $studentName ($studentId)");
-    }
+  final prefs = await SharedPreferences.getInstance();
+  if (mounted) {
+    setState(() {
+      studentId = prefs.getString('user_id') ?? "";
+      // Lấy từ khóa 'full_name' mà chúng ta đã thống nhất lưu ở trên
+      studentName = prefs.getString('full_name') ?? "Sinh viên";
+    });
   }
+}
 
   // 2. Kiểm tra thông báo chưa đọc từ API
   Future<void> _checkUnreadNotifications() async {
