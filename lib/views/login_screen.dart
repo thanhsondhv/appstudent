@@ -60,90 +60,8 @@ class _LogInWidgetState extends State<LogInWidget> with SingleTickerProviderStat
     super.dispose();
   }
   // =========================================================
-  // LAYER 1: LOGIC ĐĂNG NHẬP FACE ID
+  // LAYER 1: LOGIC ĐĂNG NHẬP OFFICE 365 (DEEP LINK)
   // =========================================================
-  Future<void> _onFaceIDPressed() async {
-  final ImagePicker picker = ImagePicker();
-  
-  try {
-    // -------------------------------------------------------
-    // BƯỚC 1: CHỤP ẢNH NHÌN THẲNG
-    // -------------------------------------------------------
-    _showStatusSnackBar("BƯỚC 1: Hãy nhìn thẳng vào camera và chụp ảnh", isError: false);
-    
-    final XFile? photoF = await picker.pickImage(
-      source: ImageSource.camera, 
-      preferredCameraDevice: CameraDevice.front,
-      imageQuality: 85, // Nén nhẹ để gửi ảnh nhanh hơn
-    );
-    
-    if (photoF == null) return; // Sinh viên hủy chụp
-
-    // -------------------------------------------------------
-    // BƯỚC 2: CHỤP ẢNH NGHIÊNG ĐẦU (ĐỂ CHECK 3D)
-    // -------------------------------------------------------
-    // Đợi 1 chút để sinh viên đọc hướng dẫn
-    await Future.delayed(const Duration(milliseconds: 500));
-    
-    _showStatusSnackBar("BƯỚC 2: Hãy QUAY ĐẦU nhẹ sang bên và chụp ảnh", isError: false);
-    
-    final XFile? photoP = await picker.pickImage(
-      source: ImageSource.camera, 
-      preferredCameraDevice: CameraDevice.front,
-      imageQuality: 85,
-    );
-    
-    if (photoP == null) return;
-
-    // -------------------------------------------------------
-    // BƯỚC 3: GỬI LÊN SERVER XỬ LÝ AI
-    // -------------------------------------------------------
-    setState(() => _isLoading = true);
-
-    // Gọi đến AuthService đã tích hợp phương thức loginByFace
-    final userData = await AuthService().loginByFace(
-      photoFront: File(photoF.path),
-      photoPose: File(photoP.path),
-    );
-
-    if (userData != null) {
-      // THÀNH CÔNG: Lấy student_id và full_name đã được Backend ghép Họ + Tên
-      final String userId = userData['student_id'].toString();
-      final String fullName = userData['full_name'] ?? "Sinh viên VinhUni";
-
-      debugPrint("✅ Face ID thành công: $fullName");
-
-      // Gọi hàm lưu session và vào trang Home
-      await _executeSuccessfulLogin(userId, fullName);
-      
-    } else {
-      // THẤT BẠI: AI báo không khớp hoặc ảnh giả mạo (2D)
-      _showStatusSnackBar("Face ID không khớp hoặc phát hiện ảnh giả mạo. Vui lòng thử lại dứt khoát hơn!", isError: true);
-    }
-
-  } catch (e) {
-    debugPrint("🔥 Lỗi FaceID: $e");
-    _showStatusSnackBar("Không thể khởi động Camera hoặc lỗi kết nối hệ thống.", isError: true);
-  } finally {
-    if (mounted) setState(() => _isLoading = false);
-  }
-}
-
-// --- HÀM HỖ TRỢ HIỂN THỊ THÔNG BÁO ---
-void _showStatusSnackBar(String message, {bool isError = true}) {
-  if (!mounted) return;
-  ScaffoldMessenger.of(context).clearSnackBars(); // Xóa các thông báo cũ
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(message, style: const TextStyle(fontWeight: FontWeight.bold)),
-      backgroundColor: isError ? Colors.red.shade700 : Colors.blue.shade700,
-      behavior: SnackBarBehavior.floating,
-      duration: Duration(seconds: isError ? 4 : 2),
-      margin: const EdgeInsets.all(20),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ),
-  );
-}
   // =========================================================
   // LAYER 1: LOGIC ĐĂNG NHẬP OFFICE 365 (DEEP LINK)
   // =========================================================
@@ -472,8 +390,8 @@ void _handleLogin() async {
                 icon: Icons.face_rounded, 
                 label: "Face ID", 
                 color: Colors.purple, 
-                onTap: _onFaceIDPressed, // 👈 Gán lệnh gọi hàm Tính năng Face ID 
-               ),
+                onTap: () => _showErrorSnackBar("Tính năng Face ID đang đồng bộ dữ liệu...")
+              ),
               const SizedBox(width: 20),
               _buildSocialBtn(
                 icon: Icons.account_balance_rounded, 
