@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
-import 'dart:io'; // 👈 THÊM DÒNG NÀY: Để dùng HttpOverrides
-import 'package:flutter/foundation.dart'; // 👈 THÊM DÒNG NÀY: Để kiểm tra kIsWeb
-
-// Import Service xử lý thông báo
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:firebase_core/firebase_core.dart'; 
+import 'firebase_options.dart'; 
 import 'services/notification_service.dart';
 
-// Import các màn hình (Views)
+// Import các màn hình
 import 'views/manhinhcho_screeen.dart';
-import 'views/login_screen.dart';
+import 'screens/login_screen.dart';
 import 'views/home_screen.dart';
 import 'views/thoikhoabieu_screen.dart';
 import 'views/thongbao_screen.dart';
@@ -15,8 +15,6 @@ import 'views/lichthi_screen.dart';
 import 'views/diemthi_screen.dart';
 import 'views/chat_screen.dart';
 
-// 👈 THÊM CLASS NÀY: Giải quyết lỗi "HandshakeException" trên Android 
-// Giúp App chấp nhận chứng chỉ HTTPS từ https://mobi.vinhuni.edu.vn
 class MyHttpOverrides extends HttpOverrides {
   @override
   HttpClient createHttpClient(SecurityContext? context) {
@@ -27,18 +25,19 @@ class MyHttpOverrides extends HttpOverrides {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (!kIsWeb) HttpOverrides.global = MyHttpOverrides();
 
-  // 👈 THÊM DÒNG NÀY: Chỉ áp dụng bỏ qua SSL trên Mobile (Android/iOS)
-  // Trên Web trình duyệt tự xử lý nên không cần/không dùng được lệnh này.
-  if (!kIsWeb) {
-    HttpOverrides.global = MyHttpOverrides();
+  try {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+    debugPrint("✅ [System] Firebase đã sẵn sàng");
+  } catch (e) {
+    debugPrint("❌ [System] Lỗi Firebase: $e");
   }
 
-  // 1. Khởi tạo Notification Service (Bao gồm Firebase)
   try {
     await NotificationService().initialize();
   } catch (e) {
-    debugPrint("⚠️ Lỗi khởi tạo Notification: $e");
+    debugPrint("⚠️ Lỗi Notification Service: $e");
   }
 
   runApp(const MyApp());
@@ -54,20 +53,14 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        primaryColor: const Color(0xFF0054A6), // Đổi về đúng màu VinhUni Blue
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF0054A6),
-          primary: const Color(0xFF0054A6),
-        ),
+        primaryColor: const Color(0xFF0054A6),
         fontFamily: 'Inter',
       ),
-      // Màn hình khởi động đầu tiên
       initialRoute: '/splash',
-      
-      // Bản đồ định tuyến (Routing)
       routes: {
         '/splash': (context) => const ManHinhChoScreen(),
-        '/': (context) => const LogInWidget(),
+        // 🚀 SỬA LỖI: Xóa chữ 'const' ở đây
+        '/': (context) => LogInWidget(), 
         '/home': (context) => const HomeScreen(),
         '/thoikhoabieu': (context) => const ThoiKhoaBieuScreen(),
         '/thongbao': (context) => const ThongBaoScreen(),

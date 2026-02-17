@@ -264,26 +264,38 @@ class HomeContent extends StatelessWidget {
 
   // 2. Thẻ thống kê (Hồ sơ, Đang xét, Đã đạt)
   Widget _buildStatisticCard() {
-    return Transform.translate(
-      offset: const Offset(0, -30),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 20),
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(20),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 15, offset: const Offset(0, 5))],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildStatItem(Icons.article_outlined, "0", "Thông báo mới", Colors.green),
-            _buildStatItem(Icons.pending_actions, "0", "Số môn có điểm", Colors.orange),
-            _buildStatItem(Icons.task_alt, "0", "Số dư TK", Colors.blue),
-          ],
-        ),
+  return Transform.translate(
+    offset: const Offset(0, -30),
+    child: Container(
+      margin: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          )
+        ],
       ),
-    );
-  }
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          // 1. Thông báo: Để số 2 cho có vẻ đang hoạt động, icon chuông
+          _buildStatItem(Icons.notifications_active_outlined, "2", "Thông báo mới", Colors.redAccent),
+          
+          // 2. Điểm thi: Để 12 môn (giả lập sinh viên năm 2-3), icon bài kiểm tra
+          _buildStatItem(Icons.assignment_turned_in_outlined, "12", "Số môn có điểm", Colors.orange),
+          
+          // 3. Số dư: Để 0đ (thêm chữ đ cho rõ ràng), icon cái ví
+          _buildStatItem(Icons.account_balance_wallet_outlined, "0đ", "Số dư TK", Colors.blue),
+        ],
+      ),
+    ),
+  );
+}
 
   Widget _buildStatItem(IconData icon, String val, String label, Color color) {
     return Column(children: [
@@ -301,41 +313,83 @@ class HomeContent extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text("Chức năng chính", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 15),
-          GridView.count(
-            shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 4, mainAxisSpacing: 20, crossAxisSpacing: 10, childAspectRatio: 0.85,
-            children: [
-              _buildFeatureItem(context, "Lịch học", Icons.event_note, Colors.blue, const ThoiKhoaBieuScreen()),
-              _buildFeatureItem(context, "Lịch thi", Icons.assignment, Colors.orange, const LichThiScreen()),
-              _buildFeatureItem(context, "Kết quả", Icons.bar_chart, Colors.green, const DiemThiScreen()),
-              _buildFeatureItem(context, "Học phí", Icons.account_balance_wallet, Colors.purple, null),
-              _buildFeatureItem(context, "Dịch vụ", Icons.apps, Colors.red, null),
-              _buildFeatureItem(context, "Khảo sát", Icons.thumbs_up_down, Colors.teal, null),
-              _buildFeatureItem(context, "Tra cứu", Icons.search, Colors.indigo, null),
-              _buildFeatureItem(context, "Liên hệ", Icons.contact_support, Colors.pink, null),
-            ],
-          ),
-        ],
+  const Text("Chức năng chính", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+  const SizedBox(height: 15),
+  GridView.count(
+    shrinkWrap: true,
+    physics: const NeverScrollableScrollPhysics(),
+    // Mẹo: Vì có 6 mục, bạn có thể sửa crossAxisCount thành 3 để chia làm 2 hàng đều nhau (3x2) sẽ đẹp hơn là 4
+    crossAxisCount: 3, 
+    mainAxisSpacing: 20,
+    crossAxisSpacing: 10,
+    childAspectRatio: 0.85,
+    children: [
+      // 1. Lịch học (Quan trọng nhất)
+      _buildFeatureItem(context, "Lịch học", Icons.event_note, Colors.blue, const ThoiKhoaBieuScreen()),
+
+      // 2. Lịch thi
+      _buildFeatureItem(context, "Lịch thi", Icons.assignment, Colors.orange, const LichThiScreen()),
+
+      // 3. Kết quả thi
+      _buildFeatureItem(context, "Kết quả", Icons.bar_chart, Colors.green, const DiemThiScreen()),
+
+      // 4. Thông báo
+      _buildFeatureItem(context, "Thông báo", Icons.notifications, Colors.redAccent, const ThongBaoScreen()), // Nhớ thay null bằng màn hình Thông báo nếu có
+
+      // 5. Hỏi đáp AI (Dùng icon robot hoặc ngôi sao AI)
+      _buildFeatureItem(context, "Trợ lý AI", Icons.auto_awesome, Colors.purple, const ChatScreen()), // Nhớ thay null bằng màn hình ChatBotScreen
+
+      // 6. Thiết lập
+      _buildFeatureItem(context, "Cá nhân", Icons.settings, Colors.blueGrey, const ProfileScreen()), // Nhớ thay null bằng màn hình Settings
+    ],
+  ),
+],
       ),
     );
   }
 
-  Widget _buildFeatureItem(BuildContext context, String title, IconData icon, Color color, Widget? target) {
-    return GestureDetector(
-      onTap: () => target != null ? Navigator.push(context, MaterialPageRoute(builder: (_) => target)) : null,
-      child: Column(children: [
+  Widget _buildFeatureItem(BuildContext context, String title, IconData icon, Color color, Widget? destination) {
+  return GestureDetector(
+    onTap: () {
+      if (destination != null) {
+        Navigator.push(context, MaterialPageRoute(builder: (context) => destination));
+      } else {
+        // Xử lý tạm cho các nút chưa có màn hình (để không bị lỗi khi bấm)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Tính năng '$title' đang được cập nhật!")),
+        );
+      }
+    },
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
         Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(15)),
-          child: Icon(icon, color: color, size: 26),
+          // 1. Tăng padding: Giúp nút bấm to hơn, chiếm nhiều diện tích hơn
+          padding: const EdgeInsets.all(18), 
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1), // Màu nền nhạt sang trọng
+            borderRadius: BorderRadius.circular(24), // Bo góc tròn trịa hơn
+          ),
+          // 2. Tăng kích thước Icon: Từ mặc định (24) lên 38 để nhìn rõ nét
+          child: Icon(icon, size: 38, color: color), 
         ),
-        const SizedBox(height: 8),
-        Text(title, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
-      ]),
-    );
-  }
+        const SizedBox(height: 12), // Khoảng cách giữa icon và chữ
+        Text(
+          title,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          // 3. Chữ đậm và to hơn một chút để cân xứng với Icon
+          style: const TextStyle(
+            fontSize: 14, 
+            fontWeight: FontWeight.w600,
+            color: Colors.black87
+          ), 
+        ),
+      ],
+    ),
+  );
+}
 
   // 4. Mục Tin tức nổi bật
   Widget _buildNewsSection() {

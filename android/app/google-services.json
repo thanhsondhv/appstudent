@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "306901265797",
+    "project_id": "vinhuni-portal-student",
+    "storage_bucket": "vinhuni-portal-student.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:306901265797:android:15bc7a6136dc76362268ec",
+        "android_client_info": {
+          "package_name": "vn.edu.vinhuni.studentapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCfnjegwOR9K5r7B0jMz3Y2hMqbIuh32s8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

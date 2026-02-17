@@ -1,147 +1,113 @@
 import 'dart:convert';
-import 'package:flutter/material.dart'; // Import này rất quan trọng để dùng Color
-import 'package:firebase_core/firebase_core.dart';
+import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
-
-// 1. Cấu hình kênh thông báo cho Android
-const AndroidNotificationChannel channel = AndroidNotificationChannel(
-  'high_importance_channel',
-  'Thông báo Sinh viên VinhUni',
-  description: 'Channel dùng cho thông báo quan trọng.',
-  importance: Importance.max,
-  playSound: true,
-);
-
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
-
-// 2. Hàm xử lý nền (Background Handler)
-@pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
-  print("🌙 Nhận thông báo ngầm: ${message.messageId}");
-}
+import 'package:shared_preferences/shared_preferences.dart';
 
 class NotificationService {
-  static final NotificationService _instance = NotificationService._internal();
-  factory NotificationService() => _instance;
-  NotificationService._internal();
+  // Domain API kết nối đến Backend FastAPI của bạn
+  static const String domainApi = "https://mobi.vinhuni.edu.vn/api";
 
-  final String domainApi = "https://mobi.vinhuni.edu.vn/api"; 
-
-  // --- KHỞI TẠO DỊCH VỤ ---
+  // 1. Khởi tạo và xin quyền thông báo
   Future<void> initialize() async {
-    try {
-      if (kIsWeb) {
-        await Firebase.initializeApp(
-          options: const FirebaseOptions(
-            apiKey: "AIzaSyDXTIJfevodiYzPDjLeyRl8zxMLwOqoRa4",
-            authDomain: "vinhuni-portal-student.firebaseapp.com",
-            projectId: "vinhuni-portal-student",
-            storageBucket: "vinhuni-portal-student.firebasestorage.app",
-            messagingSenderId: "306901265797",
-            appId: "1:306901265797:web:8082983e0b0bf5462268ec",
-            measurementId: "G-3V0DQPY80W",
-          ),
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+    // Yêu cầu quyền thông báo
+    NotificationSettings settings = await messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+      debugPrint('🔔 [System] Quyền thông báo đã được cấp.');
+      
+      // QUAN TRỌNG CHO IOS: Đăng ký nhận thông báo từ Apple ngay lập tức
+      if (Platform.isIOS) {
+        await messaging.setForegroundNotificationPresentationOptions(
+          alert: true,
+          badge: true,
+          sound: true,
         );
-      } else {
-        await Firebase.initializeApp();
       }
-
-      // Đăng ký hàm xử lý nền
-      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
-      // Cấu hình Local Notification
-      await flutterLocalNotificationsPlugin
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-          ?.createNotificationChannel(channel);
-
-      // Xin quyền
-      await FirebaseMessaging.instance.requestPermission(
-        alert: true, badge: true, sound: true,
-      );
-
-      // Lắng nghe tin nhắn khi App đang mở
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        RemoteNotification? notification = message.notification;
-        AndroidNotification? android = message.notification?.android;
-
-        if (notification != null && android != null) {
-          // HIỆN THÔNG BÁO (ĐÃ SỬA LỖI CONST)
-          flutterLocalNotificationsPlugin.show(
-            notification.hashCode,
-            notification.title,
-            notification.body,
-            NotificationDetails(
-              android: AndroidNotificationDetails(
-                channel.id,
-                channel.name,
-                channelDescription: channel.description,
-                icon: '@mipmap/ic_launcher',
-                importance: Importance.max,
-                priority: Priority.high,
-                // ĐÃ SỬA: Bỏ từ khóa 'const' ở đây vì ngữ cảnh không cho phép
-                color: const Color(0xFF0056b3), 
-              ),
-            ),
-          );
-        }
-      });
-
-      print("✅ Notification Service initialized");
-    } catch (e) {
-      print("❌ Lỗi khởi tạo Notification: $e");
     }
   }
 
-  // --- ĐỒNG BỘ TOKEN LÊN SERVER ---
+  // 2. Đồng bộ Token lên Server (Dùng chung cho Android/iOS)
   Future<void> syncTokenToServer(String studentId) async {
     try {
       String? currentToken;
+
+      // --- LOGIC RIÊNG CHO IOS ---
+      if (!kIsWeb && Platform.isIOS) {
+        debugPrint("⏳ iOS: Đang kiểm tra trạng thái APNs...");
+        String? apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+        
+        int retry = 0;
+        // Chờ tối đa 10s để Apple cấp APNs Token
+        while (apnsToken == null && retry < 5) {
+          await Future.delayed(const Duration(seconds: 2));
+          apnsToken = await FirebaseMessaging.instance.getAPNSToken();
+          retry++;
+          debugPrint("⏳ iOS: Đang chờ APNs lần $retry...");
+        }
+
+        if (apnsToken == null) {
+          debugPrint("❌ iOS Error: Không lấy được APNs Token. Kiểm tra cấu hình .p8 trên Firebase.");
+          return;
+        }
+      }
+
+      // --- LẤY FCM TOKEN ---
       if (kIsWeb) {
         currentToken = await FirebaseMessaging.instance.getToken(
-            vapidKey: "BNr8bNA8UwaqQkr236uM7Wgvo8RDbL-mBG-rOPz5pS2T5Qq-kD27GtALBQqhf3q52B0zUnSr-DuTU8bHLOuxhKA"
+          vapidKey: "BNr8bNA8UwaqQkr236uM7Wgvo8RDbL-mBG-rOPz5pS2T5Qq-kD27GtALBQqhf3q52B0zUnSr-DuTU8bHLOuxhKA"
         );
       } else {
         currentToken = await FirebaseMessaging.instance.getToken();
       }
 
-      if (currentToken == null) return;
+      if (currentToken == null) {
+        debugPrint("⚠️ Không thể lấy FCM Token từ Firebase.");
+        return;
+      }
 
+      // --- KIỂM TRA TRÙNG LẶP ---
       final prefs = await SharedPreferences.getInstance();
       String? lastToken = prefs.getString('last_fcm_token');
 
       if (lastToken == currentToken) {
-        print("ℹ️ Token chưa đổi, không cần gửi lại.");
+        debugPrint("ℹ️ Token không đổi cho SV: $studentId. Bỏ qua gửi Server.");
         return;
       }
 
-      print("📡 Đang gửi Token mới lên Server...");
+      // --- GỬI LÊN BACKEND PYTHON (FastAPI) ---
+      debugPrint("📡 Đang đồng bộ Token lên Server VinhUni...");
       
-      String deviceName = kIsWeb ? "Web Browser" : (defaultTargetPlatform == TargetPlatform.android ? "Android Device" : "iOS Device");
+      String platformName = kIsWeb ? "Web" : (Platform.isAndroid ? "Android" : "iOS");
+      String deviceName = kIsWeb ? "Browser" : (Platform.isAndroid ? "Android Device" : "iPhone 16e");
 
       final response = await http.post(
         Uri.parse("$domainApi/save-fcm-token"),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
-          "student_id": studentId,
+          "student_id": studentId, // Ví dụ: 205714023110061
           "token": currentToken,
-          "platform": kIsWeb ? "Web" : (defaultTargetPlatform == TargetPlatform.android ? "Android" : "iOS"),
+          "platform": platformName,
           "device_name": deviceName
         }),
-      );
+      ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
         await prefs.setString('last_fcm_token', currentToken);
-        print("✅ Đã lưu Token thành công!");
+        debugPrint("✅ Đã lưu Token thành công cho SV: $studentId ($platformName)");
       } else {
-        print("⚠️ Lỗi Server lưu token: ${response.statusCode}");
+        debugPrint("⚠️ Lỗi Backend (${response.statusCode}): ${response.body}");
       }
+
     } catch (e) {
-      print("💥 Lỗi syncToken: $e");
+      debugPrint("💥 Lỗi hệ thống syncToken: $e");
     }
   }
-}
+} // Kết thúc class NotificationService

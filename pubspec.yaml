@@ -1,8 +1,9 @@
 name: vinhuni_app
-description: "A new Flutter project."
+description: "Hệ thống quản lý và điểm danh sinh viên thông minh - Đại học Vinh."
 publish_to: 'none'
 
-version: 1.0.0+1
+# TĂNG LÊN +3 VÌ BẠN ĐÃ CÓ BẢN +2 TRƯỚC ĐÓ
+version: 1.0.0+5
 
 environment:
   sdk: '>=3.10.7 <4.0.0'
@@ -21,26 +22,37 @@ dependencies:
   url_launcher: ^6.3.2
   shared_preferences: ^2.2.2
 
-  # --- Firebase & Thông báo ---
-  # Lưu ý: Các phiên bản này được chọn để tương thích tốt nhất với nhau
-  firebase_core: ^2.27.0
-  firebase_messaging: ^14.7.19
-  
-  # QUAN TRỌNG: Dùng bản 17.x để không bị lỗi "Too many positional arguments"
+  # --- Firebase & Thông báo (Tối ưu cho iOS 15.8.5) ---
+  firebase_core: ^3.0.0
+  firebase_messaging: ^15.0.0
   flutter_local_notifications: ^17.2.3 
   device_info_plus: ^10.1.2
   app_links: ^7.0.0
+
+  # --- Xác thực & Camera (Chuẩn Ngân Hàng) ---
+  camera: ^0.11.0
   image_picker: ^1.0.7
+  local_auth: ^2.3.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
   
+  # BỔ SUNG ĐỂ TỰ ĐỘNG TẠO APP ICON
+  flutter_launcher_icons: ^0.13.1
+
+# CẤU HÌNH TẠO ICON TỰ ĐỘNG
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/logo.png"
+  remove_alpha_ios: true # Bắt buộc cho App Store
 
 flutter:
   uses-material-design: true
 
-  # Cấu hình ảnh (Đảm bảo bạn đã tạo thư mục assets/images ngang hàng với lib)
+  # Cấu hình tài nguyên hình ảnh
   assets:
     - assets/images/
+    - assets/images/logo.png
