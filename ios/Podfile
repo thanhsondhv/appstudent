@@ -1,0 +1,69 @@
+# 1. Thiết lập Platform tối thiểu (Nên để 13.0 hoặc 14.0 cho các Plugin mới)
+platform :ios, '13.0'
+
+# Bật/Tắt gửi số liệu thống kê
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+# 2. Logic tìm kiếm FLUTTER_ROOT
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. Run 'flutter pub get' first."
+  end
+
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/FLUTTER_ROOT\=(.*)/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+
+# Khởi tạo môi trường Flutter
+flutter_ios_podfile_setup
+
+target 'Runner' do
+  # SỬA LỖI: Sử dụng dynamic frameworks mặc định để các module Swift dễ tìm thấy Flutter hơn
+  use_frameworks! 
+
+  # Cài đặt tất cả plugin từ pubspec.yaml
+  flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+
+  target 'RunnerTests' do
+    inherit! :search_paths
+  end
+end
+
+# 3. Cấu hình Build Settings cho các Plugin
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    # Áp dụng cấu hình mặc định của Flutter cho từng target
+    flutter_additional_ios_build_settings(target)
+    
+    target.build_configurations.each do |config|
+      # Nâng cấp Deployment Target đồng bộ cho tất cả các Pods
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '13.0'
+      
+      # Tắt Bitcode (Apple đã không còn yêu cầu và thường gây lỗi build)
+      config.build_settings['ENABLE_BITCODE'] = 'NO'
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= [
+        '$(inherited)',
+        'PERMISSION_CAMERA=1',
+        'PERMISSION_PHOTOS=1',
+        'PERMISSION_MICROPHONE=0'
+      ]
+      # Hỗ trợ build cho các kiến trúc Simulator mới (Apple Silicon)
+      config.build_settings['ONLY_ACTIVE_ARCH'] = 'YES'
+      
+      # Cho phép phân phối thư viện nếu cần
+      config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
+    end
+  end
+end

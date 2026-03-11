@@ -1,147 +1,251 @@
 import 'dart:convert';
-import 'package:flutter/material.dart'; // Import này rất quan trọng để dùng Color
-import 'package:firebase_core/firebase_core.dart';
+import 'dart:io';
+import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter_app_badger/flutter_app_badger.dart';
+import 'database_helper.dart';
 
-// 1. Cấu hình kênh thông báo cho Android
-const AndroidNotificationChannel channel = AndroidNotificationChannel(
-  'high_importance_channel',
-  'Thông báo Sinh viên VinhUni',
-  description: 'Channel dùng cho thông báo quan trọng.',
-  importance: Importance.max,
-  playSound: true,
-);
-
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
-
-// 2. Hàm xử lý nền (Background Handler)
-@pragma('vm:entry-point')
-Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp();
-  print("🌙 Nhận thông báo ngầm: ${message.messageId}");
-}
+// Import key điều hướng toàn cục từ main.dart
+import '../main.dart'; 
+import '../views/thongbao_chitiet_screen.dart';
 
 class NotificationService {
+  static const String domainApi = "https://mobi.vinhuni.edu.vn/api";
+  final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
+  
+  // Callback để làm mới UI khi có thông báo tới
+  static Function? onRefreshBadge;
+
+  // Singleton pattern
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
   NotificationService._internal();
-
-  final String domainApi = "https://mobi.vinhuni.edu.vn/api"; 
-
-  // --- KHỞI TẠO DỊCH VỤ ---
+  static Map<String, dynamic>? _terminatedNotificationData;
+  // --- 1. KHỞI TẠO DỊCH VỤ ---
   Future<void> initialize() async {
-    try {
-      if (kIsWeb) {
-        await Firebase.initializeApp(
-          options: const FirebaseOptions(
-            apiKey: "AIzaSyDXTIJfevodiYzPDjLeyRl8zxMLwOqoRa4",
-            authDomain: "vinhuni-portal-student.firebaseapp.com",
-            projectId: "vinhuni-portal-student",
-            storageBucket: "vinhuni-portal-student.firebasestorage.app",
-            messagingSenderId: "306901265797",
-            appId: "1:306901265797:web:8082983e0b0bf5462268ec",
-            measurementId: "G-3V0DQPY80W",
-          ),
-        );
-      } else {
-        await Firebase.initializeApp();
+    // Kiểm tra thiết bị thật trên iOS
+    if (Platform.isIOS) {
+      final deviceInfo = DeviceInfoPlugin();
+      final iosInfo = await deviceInfo.iosInfo;
+      if (!iosInfo.isPhysicalDevice) {
+        debugPrint("⚠️ iOS Simulator: Bỏ qua Firebase.");
+        return;
       }
+    }
 
-      // Đăng ký hàm xử lý nền
-      FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    // Cấu hình Local Notifications (Để hiện tin nhắn khi đang mở App)
+    const AndroidInitializationSettings androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const DarwinInitializationSettings iosInit = DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
 
-      // Cấu hình Local Notification
-      await flutterLocalNotificationsPlugin
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-          ?.createNotificationChannel(channel);
+    await _localNotifications.initialize(
+      const InitializationSettings(android: androidInit, iOS: iosInit),
+      onDidReceiveNotificationResponse: (details) {
+        if (details.payload != null) {
+          final Map<String, dynamic> data = jsonDecode(details.payload!);
+          _handleNavigation(data);
+        }
+      },
+    );
 
-      // Xin quyền
-      await FirebaseMessaging.instance.requestPermission(
-        alert: true, badge: true, sound: true,
-      );
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
 
-      // Lắng nghe tin nhắn khi App đang mở
+    try {
+      // Yêu cầu quyền
+      await messaging.requestPermission(alert: true, badge: true, sound: true);
+
+      // Cấu hình hiển thị thông báo khi App đang mở (Foreground)
+      await messaging.setForegroundNotificationPresentationOptions(alert: true, badge: true, sound: true);
+
+      // A. Lắng nghe tin nhắn tới khi App đang mở
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-        RemoteNotification? notification = message.notification;
-        AndroidNotification? android = message.notification?.android;
+        debugPrint("📩 Nhận tin nhắn mới (Foreground): ${message.notification?.title}");
+        _showLocalNotification(message);
+        updateBadgeCount(); 
+      });
 
-        if (notification != null && android != null) {
-          // HIỆN THÔNG BÁO (ĐÃ SỬA LỖI CONST)
-          flutterLocalNotificationsPlugin.show(
-            notification.hashCode,
-            notification.title,
-            notification.body,
-            NotificationDetails(
-              android: AndroidNotificationDetails(
-                channel.id,
-                channel.name,
-                channelDescription: channel.description,
-                icon: '@mipmap/ic_launcher',
-                importance: Importance.max,
-                priority: Priority.high,
-                // ĐÃ SỬA: Bỏ từ khóa 'const' ở đây vì ngữ cảnh không cho phép
-                color: const Color(0xFF0056b3), 
-              ),
-            ),
-          );
+      // B. Lắng nghe khi nhấn vào thông báo (App đang chạy nền)
+      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+        debugPrint("🚀 Người dùng nhấn vào thông báo (Background)");
+        _handleNavigation(message.data);
+      });
+
+      // C. Lắng nghe khi App bị tắt hoàn toàn và mở lại từ thông báo
+      FirebaseMessaging.instance.getInitialMessage().then((RemoteMessage? message) {
+        if (message != null) {
+          debugPrint("🚀 App mở từ trạng thái tắt hoàn toàn");
+          Future.delayed(const Duration(milliseconds: 800), () {
+            _handleNavigation(message.data);
+          });
         }
       });
 
-      print("✅ Notification Service initialized");
+      // Cập nhật số badge khi vừa vào App
+      updateBadgeCount();
+
     } catch (e) {
-      print("❌ Lỗi khởi tạo Notification: $e");
+      debugPrint("❌ Lỗi khởi tạo Firebase: $e");
+    }
+  }
+  // --- HÀM KIỂM TRA THÔNG BÁO KHI KHỞI ĐỘNG (FIX LỖI MEMBER NOT FOUND) ---
+static Future<String?> getInitialRoute() async {
+  try {
+    RemoteMessage? initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+    
+    if (initialMessage != null && initialMessage.data.containsKey('notif_id')) {
+      // Lưu lại data để tí nữa vào Home hoặc Splash xong ta gọi điều hướng
+      _terminatedNotificationData = initialMessage.data;
+      
+      // Trả về một chuỗi đại diện (Route) để Splash Screen nhận diện
+      // Lưu ý: Chuỗi này phải khớp với logic xử lý ở Splash Screen của bạn
+      return 'SCREEN_THONG_BAO_CHI_TIET'; 
+    }
+  } catch (e) {
+    debugPrint("⚠️ Lỗi getInitialMessage: $e");
+  }
+  return null;
+}
+  // --- 2. HÀM HIỂN THỊ THÔNG BÁO NỘI BỘ (LOCAL) ---
+  void _showLocalNotification(RemoteMessage message) async {
+    RemoteNotification? notification = message.notification;
+    if (notification != null) {
+      const AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
+        'vinhuni_channel_id', 'Thông báo VinhUni',
+        importance: Importance.max,
+        priority: Priority.high,
+        playSound: true,
+      );
+      
+      const NotificationDetails platformDetails = NotificationDetails(android: androidDetails, iOS: DarwinNotificationDetails());
+
+      // Gói dữ liệu vào payload để khi nhấn vào Local Notif vẫn điều hướng được
+      await _localNotifications.show(
+        notification.hashCode,
+        notification.title,
+        notification.body,
+        platformDetails,
+        payload: jsonEncode(message.data),
+      );
     }
   }
 
-  // --- ĐỒNG BỘ TOKEN LÊN SERVER ---
-  Future<void> syncTokenToServer(String studentId) async {
+  // --- 3. HÀM ĐIỀU HƯỚNG CHI TIẾT (QUAN TRỌNG) ---
+  // --- CẬP NHẬT HÀM ĐIỀU HƯỚNG ---
+static void _handleNavigation(Map<String, dynamic> data) {
+  final String? notifId = data['notif_id']?.toString();
+  final String? type = data['type']?.toString();
+
+  if (notifId == null) return;
+
+  // Sử dụng navigatorKey để điều hướng mà không cần context
+  navigatorKey.currentState?.push(
+    MaterialPageRoute(
+      builder: (context) => ChiTietThongBaoScreen(
+        notification: {
+          'ID': int.parse(notifId),
+          'TieuDe': 'Đang tải...', 
+          'NoiDung': '',
+          'LoaiTin': type ?? 'PERSONAL'
+        },
+      ),
+    ),
+  );
+}
+
+  // --- 4. ĐỒNG BỘ TOKEN LÊN SERVER (DÙNG CLEAN ID) ---
+  static Future<void> syncTokenToServer(String userId) async {
+  try {
+    debugPrint("📡 [System] Khởi chạy sync Token cho: $userId");
+
+    // 1. Xin quyền (Bắt buộc cho Firebase 11.x trên iOS/Android 13+)
+    NotificationSettings settings = await FirebaseMessaging.instance.requestPermission(
+      alert: true, badge: true, sound: true,
+    );
+
+    if (settings.authorizationStatus != AuthorizationStatus.authorized) {
+      debugPrint("❌ [System] Quyền thông báo bị từ chối.");
+      return;
+    }
+
+    // 2. Lấy Token từ Firebase
+    String? token = await FirebaseMessaging.instance.getToken();
+    if (token == null) return;
+    
+    debugPrint("🔑 [System] FCM Token lấy được: $token");
+
+    // 3. Gọi API lưu vào SQL (Khớp với router.py)
+    final response = await http.post(
+      Uri.parse("https://mobi.vinhuni.edu.vn/api/save-fcm-token"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({
+        "student_id": userId, // Gửi nguyên mã CB1679
+        "token": token,
+        "platform": Platform.isAndroid ? "Android" : "iOS",
+        "device_name": "iPhone NTS"
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      debugPrint("✅ [System] ĐÃ ĐỒNG BỘ TOKEN VÀO SQL THÀNH CÔNG!");
+    } else {
+      debugPrint("⚠️ [System] Server phản hồi lỗi: ${response.body}");
+    }
+  } catch (e) {
+    debugPrint("🔥 [System] Lỗi khi sync Token: $e");
+  }
+}
+
+  // --- 5. CẬP NHẬT BADGE (SỐ TIN CHƯA ĐỌC) ---
+  Future<void> updateBadgeCount() async {
     try {
-      String? currentToken;
-      if (kIsWeb) {
-        currentToken = await FirebaseMessaging.instance.getToken(
-            vapidKey: "BNr8bNA8UwaqQkr236uM7Wgvo8RDbL-mBG-rOPz5pS2T5Qq-kD27GtALBQqhf3q52B0zUnSr-DuTU8bHLOuxhKA"
-        );
-      } else {
-        currentToken = await FirebaseMessaging.instance.getToken();
-      }
-
-      if (currentToken == null) return;
-
       final prefs = await SharedPreferences.getInstance();
-      String? lastToken = prefs.getString('last_fcm_token');
-
-      if (lastToken == currentToken) {
-        print("ℹ️ Token chưa đổi, không cần gửi lại.");
-        return;
-      }
-
-      print("📡 Đang gửi Token mới lên Server...");
+      final String? userId = prefs.getString('user_code') ?? prefs.getString('user_id');
       
-      String deviceName = kIsWeb ? "Web Browser" : (defaultTargetPlatform == TargetPlatform.android ? "Android Device" : "iOS Device");
+      if (userId == null) return;
 
-      final response = await http.post(
-        Uri.parse("$domainApi/save-fcm-token"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "student_id": studentId,
-          "token": currentToken,
-          "platform": kIsWeb ? "Web" : (defaultTargetPlatform == TargetPlatform.android ? "Android" : "iOS"),
-          "device_name": deviceName
-        }),
-      );
-
+      final response = await http.get(Uri.parse("$domainApi/count-unread/$userId"));
       if (response.statusCode == 200) {
-        await prefs.setString('last_fcm_token', currentToken);
-        print("✅ Đã lưu Token thành công!");
-      } else {
-        print("⚠️ Lỗi Server lưu token: ${response.statusCode}");
+        final data = jsonDecode(response.body);
+        int unreadCount = data['unread_count'] ?? 0;
+
+        if (await FlutterAppBadger.isAppBadgeSupported()) {
+          unreadCount > 0 ? FlutterAppBadger.updateBadgeCount(unreadCount) : FlutterAppBadger.removeBadge();
+        }
+        
+        await prefs.setInt('unread_notif_count', unreadCount);
+        if (onRefreshBadge != null) onRefreshBadge!();
       }
     } catch (e) {
-      print("💥 Lỗi syncToken: $e");
+      debugPrint("⚠️ Lỗi updateBadge: $e");
     }
+  }
+
+  // --- 6. ĐỒNG BỘ TIN NHẮN OFFLINE ---
+  static Future<List<dynamic>> fetchAndSyncNotifs(String userId) async {
+    List<dynamic> localData = await DatabaseHelper.instance.getOfflineNotifs();
+
+    try {
+      final response = await http.get(Uri.parse("$domainApi/get-notifs/$userId?page=1"))
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> serverData = json.decode(utf8.decode(response.bodyBytes));
+        for (var n in serverData) {
+          await DatabaseHelper.instance.insertNotification(n);
+        }
+        return await DatabaseHelper.instance.getOfflineNotifs();
+      }
+    } catch (e) {
+      debugPrint("🔥 Lỗi đồng bộ tin nhắn: $e");
+    }
+    return localData;
   }
 }
