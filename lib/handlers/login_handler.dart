@@ -1,62 +1,62 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart'; 
 import '../services/notification_service.dart';
 
 class LoginHandler {
-  /// Đăng ký hoặc hủy đăng ký nhận thông báo theo Topic chung
-  static Future<void> handleNotificationTopic(bool isSubscribing) async {
+  static const _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+
+  /// Kiểm tra xem User này đã có Face ID trong máy chưa
+  static Future<bool> isFaceRegistered(String numericId, String loginUserName) async {
     try {
-      if (isSubscribing) {
-        await FirebaseMessaging.instance.subscribeToTopic("vinhuni_all_students");
-      } else {
-        await FirebaseMessaging.instance.unsubscribeFromTopic("vinhuni_all_students");
-      }
+      // 1. Kiểm tra trong két sắt bảo mật
+      String? savedUser = await _storage.read(key: 'bio_user');
+      
+      // 2. Nếu két sắt đang giữ đúng username (ntson) hoặc mã số (1679)
+      // thì báo true để không hiện Dialog nữa
+      return (savedUser == loginUserName || savedUser == numericId);
     } catch (e) {
-      debugPrint("⚠️ Lỗi xử lý Topic thông báo: $e");
+      return false;
     }
   }
 
-  /// Xử lý logic sau khi đăng nhập thành công
   static Future<void> executeSuccessfulLogin(
       BuildContext context, String userId, String fullName, {String? role}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       
-      // 1. Lưu thông tin cơ bản vào máy
-      await prefs.setString('user_id', userId);
-      await prefs.setString('user_code', userId); // Đồng bộ mã sinh viên/giảng viên
-      
-      String finalName = (fullName.trim().isEmpty) ? "Thành viên VinhUni" : fullName;
-      await prefs.setString('full_name', finalName);
-      
-      // 2. Lưu vai trò người dùng (Sinh viên/Cán bộ)
-      // 🔥 Ưu tiên role truyền vào, nếu không có thì đọc lại từ prefs (do AuthService đã lưu trước đó)
-      if (role != null && role.isNotEmpty) {
-        await prefs.setString('user_role', role);
-      } else {
-        final savedRole = prefs.getString('user_role');
-        if (savedRole == null || savedRole.isEmpty) {
-          await prefs.setString('user_role', 'SinhVien');
-        }
-      }
+      // 1. Làm sạch ID lần cuối (CB1679 -> 1679)
+      String cleanId = userId.replaceAll(RegExp(r'[^0-9]'), '');
+      if (cleanId.isEmpty) cleanId = userId;
 
-      // 3. Kích hoạt thông báo và đồng bộ Token FCM lên Server
-      await handleNotificationTopic(true);
-      await NotificationService.syncTokenToServer(userId);
+      // 2. 🔥 LƯU CỰC KỲ CHẮC CHẮN (Dùng await cho từng dòng)
+      await prefs.setString('user_id', cleanId);
+      await prefs.setString('user_code', cleanId);
+      await prefs.setString('full_name', fullName);
+      await prefs.setString('user_role', role ?? 'CanBo'); // Quan trọng để banner hiện đúng
+      await prefs.setBool('is_logged_in', true);
 
-      // 4. ĐIỀU HƯỚNG VÀ XÓA STACK (Giải quyết lỗi nút Back)
+      // 3. Đồng bộ Notify (Có thể không cần await quá lâu để tránh delay)
+      NotificationService.syncTokenToServer(cleanId);
+      FirebaseMessaging.instance.subscribeToTopic("vinhuni_all_students");
+
+      debugPrint("✅ [Handler] Đã lưu xong dữ liệu cho $role: $cleanId");
+
+      // 4. CHỜ 1 CHÚT (Khoảng 200ms) để hệ thống kịp cập nhật bộ nhớ rồi mới nhảy Home
+      await Future.delayed(const Duration(milliseconds: 200));
+
       if (context.mounted) {
-        // Sử dụng pushNamedAndRemoveUntil để xóa sạch các màn hình cũ (như màn hình Login)
-        // Sau lệnh này, nút Back ở màn hình chính sẽ không thể quay lại màn hình Login nữa.
         Navigator.pushNamedAndRemoveUntil(
           context, 
           '/home', 
-          (route) => false, 
+          (route) => false
         );
       }
     } catch (e) {
-      debugPrint("❌ Lỗi nghiêm trọng khi lưu phiên đăng nhập: $e");
+      debugPrint("❌ Lỗi LoginHandler: $e");
     }
   }
 }

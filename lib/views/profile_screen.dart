@@ -4,6 +4,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'notification_settings_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final VoidCallback? onAvatarUpdate;
@@ -36,21 +38,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _loadProfile() async {
     final prefs = await SharedPreferences.getInstance();
     
-    // 1. Lấy mã ID và xử lý cắt bỏ tiền tố (SV hoặc CB)
-    String rawId = prefs.getString('user_code') ?? prefs.getString('user_id') ?? "";
-    String cleanId = rawId.toUpperCase().replaceAll(RegExp(r'^(SV|CB)'), ''); 
-    String role = prefs.getString('role') ?? "";
+    // Lấy user_code đã được AuthService làm sạch thành số (1679)
+    String savedId = prefs.getString('user_code') ?? "";
 
     setState(() {
       studentName = prefs.getString('full_name') ?? "Người dùng";
-      studentId = cleanId;
-      userRole = role;
-      isNotifEnabled = prefs.getBool('receive_notifications') ?? true;
+      studentId = savedId; // Chắc chắn lúc này là "1679"
+      userRole = prefs.getString('user_role') ?? "SinhVien";
     });
 
-    // 2. Chỉ gọi API thông tin thêm nếu có ID
-    if (cleanId.isNotEmpty) {
-      _fetchStudentExtraInfo(cleanId);
+    if (studentId.isNotEmpty) {
+      _fetchStudentExtraInfo(studentId);
     }
   }
 
@@ -239,11 +237,53 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating));
   }
 
-  void _logout() async {
+  Future<void> _logout() async {
+  // 1. Hiện thông báo xác nhận để tránh bấm nhầm
+  bool? confirm = await showDialog(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text("Đăng xuất"),
+      content: const Text("Bạn có muốn xóa luôn liên kết Face ID trên thiết bị này không?"),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false), 
+          child: const Text("KHÔNG, CHỈ ĐĂNG XUẤT")
+        ),
+        ElevatedButton(
+          style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+          onPressed: () => Navigator.pop(ctx, true), 
+          child: const Text("CÓ, XÓA TẤT CẢ", style: TextStyle(color: Colors.white))
+        ),
+      ],
+    ),
+  );
+
+  if (confirm == null) return; // Người dùng bấm ra ngoài hoặc hủy
+
+  setState(() => _isUpdatingFace = true); // Hiển thị loading nhẹ
+
+  try {
+    // 2. Xóa sạch SharedPreferences (Token, ID, Role...)
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
-    if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+
+    // 3. Nếu người dùng chọn "CÓ", xóa luôn mật khẩu trong két sắt bảo mật
+    if (confirm == true) {
+      const storage = FlutterSecureStorage();
+      await storage.delete(key: 'bio_user');
+      await storage.delete(key: 'bio_pwd');
+    }
+
+    // 4. Đưa người dùng về màn hình đăng nhập và xóa toàn bộ lịch sử các màn hình cũ
+    if (mounted) {
+      Navigator.pushNamedAndRemoveUntil(context, '/', (route) => false);
+    }
+  } catch (e) {
+    _showMessage("Lỗi khi đăng xuất: $e");
+  } finally {
+    if (mounted) setState(() => _isUpdatingFace = false);
   }
+}
 
   // Widget hiển thị Badge thông tin thêm
   Widget _buildInfoBadges() {
@@ -319,15 +359,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
               decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)),
               child: Column(
                 children: [
-                  SwitchListTile(
-                    activeColor: vinhUniBlue, secondary: const Icon(Icons.notifications_active_outlined, color: Colors.orange),
-                    title: const Text("Nhận thông báo", style: TextStyle(fontSize: 15)), value: isNotifEnabled, 
-                    onChanged: (val) async {
-                      setState(() => isNotifEnabled = val);
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.setBool('receive_notifications', val);
-                      _showMessage(val ? "🔔 Đã BẬT thông báo" : "🔕 Đã TẮT thông báo");
-                    },
+                  _buildMenuTile(
+                    Icons.notifications_active_outlined, 
+                    "Cấu hình nhận thông báo", 
+                    Colors.orange, 
+                    onTap: () => Navigator.push(
+                      context, 
+                      MaterialPageRoute(builder: (context) => NotificationSettingsScreen(userId: studentId, userRole: userRole))
+                    )
                   ),
                   const Divider(height: 1, indent: 50),
                   _buildMenuTile(Icons.lock_outline, "Đổi mật khẩu", Colors.blue, onTap: _showChangePasswordDialog),
