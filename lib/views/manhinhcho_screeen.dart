@@ -209,7 +209,7 @@ class _ManHinhChoScreenState extends State<ManHinhChoScreen> with TickerProvider
             child: Column(
               children: [
                 Text(
-                  "Version 1.0.0",
+                  "Version 1.3.0",
                   style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11),
                 ),
                 const SizedBox(height: 6),

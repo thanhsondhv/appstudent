@@ -21,7 +21,8 @@ import 'duyet_vang_hoc_screen.dart';
 import 'mo_diem_danh_screen.dart';
 import 'diem_danh_sv_screen.dart';
 import 'qr_scanner_screen.dart';
-
+import 'congcambo_screen.dart';
+import '../services/database_helper.dart'; // 🔥 Dòng quan trọng nhất để sửa lỗi của bạn
 final GlobalKey<ChatScreenState> chatScreenKey = GlobalKey<ChatScreenState>();
 
 class HomeScreen extends StatefulWidget {
@@ -43,8 +44,8 @@ class _HomeScreenState extends State<HomeScreen> {
   String studentName = "Đang tải...";
   String studentId = ""; 
   String userRole = "SinhVien"; 
-  String userFaculty = ""; // Chức vụ/Khoa
-  String userDept = "";    // Phòng ban
+  String userFaculty = ""; 
+  String userDept = "";    
   
   List<dynamic> studentProfilesList = [];
   int _avatarVersion = DateTime.now().millisecondsSinceEpoch;
@@ -58,15 +59,20 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initAppData() async {
-    await _loadUserInfo();
-    _fetchDynamicMenu();
-    if (studentId.isNotEmpty) {
-      _fetchStudentExtraInfo(studentId);
-      NotificationService.syncTokenToServer(studentId); 
-    }
-  }
+  // 1. Load User Info lên trước để lấy Role
+  await _loadUserInfo(); 
+  
+  // 2. Chạy song song các vụ bốc dữ liệu khác
+  Future.wait([
+    _fetchDynamicMenu(),
+    if (studentId.isNotEmpty) _fetchStudentExtraInfo(studentId),
+  ]);
 
-  // --- 3. LOAD THÔNG TIN (DUY NHẤT 1 HÀM) ---
+  if (studentId.isNotEmpty) {
+    NotificationService.syncTokenToServer(studentId); 
+  }
+}
+
   Future<void> _loadUserInfo() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
@@ -147,7 +153,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // --- 5. TIỆN ÍCH UI ---
   void _showSnackBar(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: color, behavior: SnackBarBehavior.floating),
@@ -169,25 +174,53 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // --- 6. API FETCHING ---
   Future<void> _fetchDynamicMenu() async {
-    final prefs = await SharedPreferences.getInstance();
-    final cacheKey = 'cache_app_menu_$userRole';
-    final cachedStr = prefs.getString(cacheKey);
-    if (cachedStr != null && cachedStr.isNotEmpty) {
-      setState(() => appMenu = json.decode(cachedStr));
+  final prefs = await SharedPreferences.getInstance();
+  
+  // 1. Xác định Role chuẩn (Ưu tiên lấy từ biến đã load ở _loadUserInfo)
+  String rawRole = (prefs.getString('user_role') ?? userRole).toLowerCase().trim();
+  String roleForApi = (rawRole == 'admin' || rawRole == 'ad' || rawRole == 'covan' || rawRole == 'canbo' || rawRole == 'cb') 
+      ? "CB" 
+      : "SV";
+
+  final cacheKey = 'cache_app_menu_$roleForApi';
+
+  // 2. 🔥 BƯỚC 1: HIỆN CACHE NGAY LẬP TỨC (0.01 giây)
+  final cachedStr = prefs.getString(cacheKey);
+  if (cachedStr != null && cachedStr.isNotEmpty) {
+    final List<dynamic> cachedData = json.decode(cachedStr);
+    if (mounted) {
+      setState(() {
+        appMenu = cachedData;
+      });
+      debugPrint("🚀 Đã hiện Menu từ máy (Cache)");
     }
-    try {
-      final url = 'https://mobi.vinhuni.edu.vn/api/app-menu/$userRole';
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        await prefs.setString(cacheKey, response.body);
-        if (mounted) setState(() => appMenu = data);
-      }
-    } catch (e) {}
   }
 
+  // 3. 🔥 BƯỚC 2: GỌI API CẬP NHẬT NGẦM
+  try {
+    final url = 'https://mobi.vinhuni.edu.vn/api/app-menu/$roleForApi';
+    final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+    
+    if (response.statusCode == 200) {
+      final List<dynamic> newData = json.decode(response.body);
+      
+      // Nếu dữ liệu mới khác dữ liệu cũ thì mới update UI để tránh lag
+      if (json.encode(newData) != cachedStr) {
+        await prefs.setString(cacheKey, response.body); // Lưu cache mới
+        if (mounted) {
+          setState(() {
+            appMenu = newData;
+          });
+        }
+        debugPrint("✅ Đã cập nhật Menu mới từ Server");
+      }
+    }
+  } catch (e) {
+    debugPrint("🔥 Lỗi mạng khi tải Menu: $e");
+    // Nếu lỗi mạng mà đã có cache thì vẫn dùng cache, không báo lỗi cho user
+  }
+}
   Future<void> _fetchUnreadCount() async {
     if (studentId.isEmpty) return;
     try {
@@ -200,14 +233,42 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _fetchStudentExtraInfo(String id) async {
-    if (id.isEmpty || userRole == 'CanBo') return;
+    final role = userRole.toLowerCase(); // Lấy từ biến role đã có
+    
+    // Nếu là nhân sự thì không cần load bảng điểm
+    if (id.isEmpty || role == 'canbo' || role == 'admin' || role == 'covan' || role == 'ad' || role == 'cb') {
+      return;
+    }
+
+    final db = DatabaseHelper.instance;
+
+    // 🔥 1. ĐỌC CACHE SQLITE TRƯỚC (Hiện số ngay lập tức)
+    try {
+      final cachedStats = await db.getStudentStats(id);
+      if (cachedStats != null && mounted) {
+        setState(() => studentProfilesList = cachedStats);
+      }
+    } catch (e) {
+      debugPrint("Lỗi đọc cache stats: $e");
+    }
+
+    // 🔥 2. GỌI MẠNG CẬP NHẬT (Âm thầm)
     try {
       final response = await http.get(Uri.parse('https://mobi.vinhuni.edu.vn/api/student-info/$id'));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        if (mounted) setState(() => studentProfilesList = data['profiles'] ?? []);
+        final List profiles = data['profiles'] ?? [];
+        
+        // Lưu vào máy cho lần sau
+        await db.saveStudentStats(id, profiles);
+        
+        if (mounted) {
+          setState(() => studentProfilesList = profiles);
+        }
       }
-    } catch (e) {}
+    } catch (e) {
+      debugPrint("Offline: Đang hiển thị điểm số cũ.");
+    }
   }
 
   void _refreshAvatar() {
@@ -218,19 +279,26 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
+    // Tạo URL avatar có version để tránh bị cache ảnh cũ
     String avatarUrl = 'https://mobi.vinhuni.edu.vn/api/get-avatar/$studentId?v=$_avatarVersion';
 
+    // Danh sách các màn hình tương ứng với BottomNavigationBar
     final List<Widget> screens = [
       HomeContent(
-        studentName: studentName, studentId: studentId, userRole: userRole,
-        faculty: userFaculty, avatarUrl: avatarUrl, appMenu: appMenu, 
+        studentName: studentName, 
+        studentId: studentId, 
+        userRole: userRole, // Role từ SharedPreferences
+        faculty: userFaculty, 
+        avatarUrl: avatarUrl, 
+        appMenu: appMenu, 
         studentProfilesList: studentProfilesList, 
-        onAvatarTap: () => setState(() => _currentIndex = 4),
-        onChatTap: () => setState(() => _currentIndex = 3),
+        onAvatarTap: () => setState(() => _currentIndex = 4), // Chuyển sang tab Cá nhân
+        onChatTap: () => setState(() => _currentIndex = 3),  // Chuyển sang tab Chat AI
       ),
       const ThongBaoScreen(),
-      const SizedBox(), 
+      const SizedBox(), // Chỗ trống giữ chỗ cho nút Quét mã ở giữa
       ChatScreen(key: chatScreenKey), 
       ProfileScreen(onAvatarUpdate: _refreshAvatar),
     ];
@@ -241,17 +309,11 @@ class _HomeScreenState extends State<HomeScreen> {
       drawer: _buildModernDrawer(context, avatarUrl),
       body: IndexedStack(
         index: _currentIndex, 
+        // Logic SafeArea: Riêng màn hình Chat (index 3) cho phép tràn viền để đẹp hơn
         children: screens.asMap().entries.map((entry) {
           return entry.key == 3 ? entry.value : SafeArea(child: entry.value);
         }).toList(),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _handleQRScan,
-        backgroundColor: const Color(0xFF003366),
-        shape: const CircleBorder(),
-        child: const Icon(Icons.qr_code_scanner_rounded, color: Colors.white, size: 28),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       bottomNavigationBar: _buildModernBottomBar(),
     );
   }
@@ -304,18 +366,24 @@ class _HomeScreenState extends State<HomeScreen> {
       child: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: (index) {
-          if (index == 2) return; 
+          // 🔥 Nếu nhấn vào nút ở giữa (index 2), thực hiện quét QR luôn
+          if (index == 2) {
+            _handleQRScan();
+            return;
+          }
           setState(() => _currentIndex = index);
         },
         type: BottomNavigationBarType.fixed,
         selectedItemColor: vinhUniBlue,
+        unselectedItemColor: Colors.grey,
         items: [
           const BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: "Trang chủ"),
           BottomNavigationBarItem(
             icon: _unreadCount > 0 ? Badge(label: Text('$_unreadCount'), child: const Icon(Icons.notifications_rounded)) : const Icon(Icons.notifications_rounded),
             label: "Thông báo"
           ),
-          const BottomNavigationBarItem(icon: SizedBox.shrink(), label: ""),
+          // 🔥 Nút Quét mã thay cho SizedBox trống
+          const BottomNavigationBarItem(icon: Icon(Icons.qr_code_scanner_rounded), label: "Quét mã"),
           const BottomNavigationBarItem(icon: Icon(Icons.chat_bubble_rounded), label: "Trợ lý AI"),
           const BottomNavigationBarItem(icon: Icon(Icons.person_rounded), label: "Cá nhân"),
         ],
@@ -368,20 +436,36 @@ class _HomeContentState extends State<HomeContent> {
       case 'campaign_rounded': return Icons.campaign_rounded;
       case 'auto_awesome': return Icons.auto_awesome;
       case 'settings': return Icons.settings;
+      case 'leaderboard': return Icons.leaderboard_rounded; // Cho Xếp loại
+      case 'account_box': return Icons.account_box_rounded; // Cho Hồ sơ
+      case 'contact_phone': return Icons.contact_phone_rounded; // Cho Danh bạ
       default: return Icons.widgets_rounded; 
     }
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
+    // Chuẩn hóa role về chữ thường để so sánh không bị sai
+    final String role = widget.userRole.toLowerCase();
+    
+    // Kiểm tra xem người dùng có phải là nhân sự (Staff) hay không
+    bool isStaff = role == 'canbo' || role == 'admin' || role == 'covan' || role == 'ad' || role == 'cb';
+
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.only(bottom: 120),
       child: Column(
         children: [
           _buildHeader(),
-          if (widget.userRole != 'CanBo') _buildStatisticCard(),
-          if (widget.userRole == 'CanBo') _buildTeacherBanner(),
+          
+          // 🔥 FIX LỖI XOAY TẠI ĐÂY:
+          // Nếu là nhân sự (Admin/Cố vấn/Cán bộ) thì hiện Banner, không hiện Bảng điểm
+          if (isStaff) 
+            _buildTeacherBanner() 
+          else 
+            _buildStatisticCard(),
+            
           _buildSearchBar(), 
           const SizedBox(height: 15),
           _buildFeatureGrid(), 
@@ -503,7 +587,7 @@ class _HomeContentState extends State<HomeContent> {
       transform: Matrix4.translationValues(0, -20, 0),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFF003366).withOpacity(0.2), width: 1.5), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 20, offset: const Offset(0, 10))]),
-      child: Row(children: [Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(Icons.admin_panel_settings_rounded, color: Colors.orange, size: 32)), const SizedBox(width: 16), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text("Cổng thông tin Cán bộ", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF003366))), const SizedBox(height: 4), Text("Hệ thống quản lý và hỗ trợ đào tạo VinhUni", style: TextStyle(fontSize: 12, color: Colors.blueGrey, height: 1.4))]))]),
+      child: Row(children: [Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), shape: BoxShape.circle), child: const Icon(Icons.admin_panel_settings_rounded, color: Colors.orange, size: 32)), const SizedBox(width: 16), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text("Cổng thông tin Cán bộ", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF003366))), const SizedBox(height: 4), Text("Hệ thống quản lý, hỗ trợ  người học", style: TextStyle(fontSize: 12, color: Colors.blueGrey, height: 1.4))]))]),
     );
   }
 
@@ -540,6 +624,19 @@ class _HomeContentState extends State<HomeContent> {
                     case '/vanban': Navigator.push(context, MaterialPageRoute(builder: (context) => const VanBanScreen())); break;
                     case '/certificate_page': Navigator.push(context, MaterialPageRoute(builder: (context) => CertificatePage(studentId: widget.studentId))); break;
                     case '/lichcongtac': Navigator.push(context, MaterialPageRoute(builder: (context) => StaffScheduleScreen())); break;
+                    // --- TÍCH HỢP CỔNG CÁN BỘ (WEBVIEW) ---
+                    case '/xep_loai':
+                      Navigator.push(context, MaterialPageRoute(builder: (context) => XepLoaiScreen(
+                        hsid: widget.studentId, 
+                        chucNang: 'xep-loai', // Slug URL phía Odoo
+                        title: 'Xếp loại cán bộ'
+                      ))); break;
+                    case '/ho_so':
+                      Navigator.push(context, MaterialPageRoute(builder: (context) => XepLoaiScreen(
+                        hsid: widget.studentId, 
+                        chucNang: 'ho-so-ca-nhan', 
+                        title: 'Hồ sơ cán bộ'
+                      ))); break;
                     case '/ket_qua_chung_nhan': Navigator.push(context, MaterialPageRoute(builder: (context) => ChungChiTraCuuScreen(userMaSV: widget.studentId))); break;
                     default: try { Navigator.pushNamed(context, route); } catch (e) {} break;
                   }

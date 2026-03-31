@@ -24,7 +24,8 @@ import 'views/bang_diem_tong_hop_screen.dart';
 import 'views/tai_chinh_screen.dart';
 import 'views/bhyt_screen.dart';
 import 'views/feature_building_screen.dart';
-import 'views/gui_thong_bao_screen.dart';
+//import 'views/gui_thong_bao_screen.dart';
+import 'views/notification/notification_portal_screen.dart';
 
 // 🔥 QUAN TRỌNG: Khai báo Navigator Key toàn cục
 // Biến này cực kỳ quan trọng để NotificationService có thể nhảy thẳng vào 
@@ -121,7 +122,7 @@ class MyApp extends StatelessWidget {
         '/canhbaoht': (context) => FeatureBuildingScreen(title: "CẢNH BÁO HỌC TẬP"),
         
         // Route dành cho Giảng viên/Cán bộ gửi tin
-        '/guitin': (context) => const GuiThongBaoScreen(),
+        '/guitin': (context) => const NotificationPortalScreen(),
         '/tkb_giangvien': (context) => const TkbGiangVienScreen(),
       },
     );

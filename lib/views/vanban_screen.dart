@@ -1,9 +1,15 @@
-//vanban_screen.dart
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:share_plus/share_plus.dart';
+import 'dart:io'; // 🔥 Sửa lỗi: Platform, Directory
+import 'package:dio/dio.dart'; // 🔥 Sửa lỗi: Dio
+import 'package:path_provider/path_provider.dart'; // 🔥 Sửa lỗi: getExternalStorageDirectory...
+import 'package:permission_handler/permission_handler.dart'; // 🔥 Sửa lỗi: Permission
+// 🔥 QUAN TRỌNG: Sửa đường dẫn này cho đúng với cấu trúc project của Sơn
+import 'package:vinhuni_app/services/database_helper.dart'; 
+
 class VanBanScreen extends StatefulWidget {
   const VanBanScreen({super.key});
 
@@ -18,64 +24,141 @@ class _VanBanScreenState extends State<VanBanScreen> {
   bool isLoading = false;
   final Color vinhUniBlue = const Color(0xFF0054A6);
 
+  // --- CÁC BIẾN QUẢN LÝ BỘ LỌC ---
+  String selectedCategory = "Tất cả";
+  int selectedMonth = 0; 
+  DateTime? startDate;
+  DateTime? endDate;
+  final List<String> categories = ["Tất cả", "Quyết định", "Thông báo", "Báo cáo", "Công văn", "Kế hoạch"];
+
   @override
   void initState() {
     super.initState();
-    // 🔥 Tự động tải 20 văn bản mới nhất ngay khi mở màn hình
-    _performSearch(); 
+    _loadCachedData(); // Hiện dữ liệu cũ từ SQLite ngay lập tức
+    _performSearch();   // Gọi API lấy dữ liệu mới nhất
   }
 
-  // Logic gọi API tìm kiếm
+  // 1. Lấy dữ liệu từ SQLite (Dùng khi vừa mở app hoặc mất mạng)
+  Future<void> _loadCachedData() async {
+    try {
+      final cachedDocs = await DatabaseHelper.instance.getCachedDocuments();
+      if (cachedDocs.isNotEmpty && documents.isEmpty) {
+        setState(() {
+          documents = cachedDocs;
+        });
+        debugPrint("📱 Đã nạp ${cachedDocs.length} văn bản từ SQLite");
+      }
+    } catch (e) {
+      debugPrint("❌ Lỗi load SQLite: $e");
+    }
+  }
+
+  // 2. Logic gọi API tích hợp BỘ LỌC và CACHE
   Future<void> _performSearch() async {
     String query = _searchController.text.trim();
-    
-    // Đã bỏ dòng "if (query.isEmpty) return;" để khi vừa vào trang (query rỗng) 
-    // vẫn gửi yêu cầu lên Backend lấy 20 bản tin mới nhất.
-
     setState(() => isLoading = true);
 
     try {
-      final String url = "https://mobi.vinhuni.edu.vn/api/docs/search"
+      // Xây dựng URL với đầy đủ tham số lọc
+      String url = "https://mobi.vinhuni.edu.vn/api/docs/search"
           "?query=${Uri.encodeComponent(query)}"
           "&is_ai=${isAiSearch ? 1 : 0}";
+
+      if (selectedCategory != "Tất cả") url += "&category=${Uri.encodeComponent(selectedCategory)}";
+      if (selectedMonth > 0) url += "&month=$selectedMonth";
+      if (startDate != null && endDate != null) {
+        url += "&start_date=${startDate!.toIso8601String().split('T')[0]}";
+        url += "&end_date=${endDate!.toIso8601String().split('T')[0]}";
+      }
 
       final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
+        final List<dynamic> newDocs = jsonDecode(response.body);
         setState(() {
-          documents = jsonDecode(response.body);
+          documents = newDocs;
           isLoading = false;
         });
+
+        // 💾 Lưu vào SQLite để dùng Offline
+        if (newDocs.isNotEmpty) {
+          await DatabaseHelper.instance.saveDocumentsCache(newDocs);
+        }
       }
     } catch (e) {
-      debugPrint("❌ Lỗi: $e");
+      debugPrint("⚠️ Lỗi API: $e. Sử dụng dữ liệu Offline.");
+      await _loadCachedData();
       setState(() => isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Lỗi kết nối máy chủ!")),
-        );
-      }
     }
   }
 
-  // Mở màn hình PDF nội bộ
-  void _openPdf(String? url, String? title) {
-    if (url == null || url.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Văn bản này chưa có bản PDF số hóa")),
-      );
-      return;
-    }
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => PdfViewerPage(
-          url: url,
-          title: title ?? "Chi tiết văn bản",
+  // 3. Hiển thị bảng chọn bộ lọc (Bottom Sheet)
+  void _showFilterSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("Bộ lọc văn bản", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+                ],
+              ),
+              const Divider(),
+              const Text("Loại văn bản", style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                children: categories.map((cat) => ChoiceChip(
+                  label: Text(cat, style: const TextStyle(fontSize: 12)),
+                  selected: selectedCategory == cat,
+                  selectedColor: vinhUniBlue.withOpacity(0.2),
+                  onSelected: (val) => setSheetState(() => selectedCategory = cat),
+                )).toList(),
+              ),
+              const SizedBox(height: 20),
+              const Text("Khoảng ngày ban hành", style: TextStyle(fontWeight: FontWeight.bold)),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.date_range, color: Colors.orange),
+                title: Text(startDate == null ? "Chọn khoảng ngày" : "${startDate!.day}/${startDate!.month} - ${endDate!.day}/${endDate!.month}"),
+                trailing: startDate != null ? IconButton(icon: const Icon(Icons.clear), onPressed: () => setSheetState(() { startDate = null; endDate = null; })) : null,
+                onTap: () async {
+                  final picked = await showDateRangePicker(context: context, firstDate: DateTime(2022), lastDate: DateTime.now());
+                  if (picked != null) setSheetState(() { startDate = picked.start; endDate = picked.end; });
+                },
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: vinhUniBlue, padding: const EdgeInsets.symmetric(vertical: 15)),
+                  onPressed: () { Navigator.pop(context); _performSearch(); },
+                  child: const Text("Áp dụng bộ lọc", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  void _openPdf(String? url, String? title) {
+    if (url == null || url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Chưa có bản PDF số hóa")));
+      return;
+    }
+    Navigator.push(context, MaterialPageRoute(builder: (context) => PdfViewerPage(url: url, title: title ?? "Văn bản")));
   }
 
   @override
@@ -87,15 +170,27 @@ class _VanBanScreenState extends State<VanBanScreen> {
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white)),
         backgroundColor: vinhUniBlue,
         centerTitle: true,
-        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_ios, color: Colors.white), 
+          onPressed: () => Navigator.pop(context)
         ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: TextButton.icon(
+              onPressed: _showFilterSheet, // Mở bảng lọc ở màn hình danh sách
+              icon: const Icon(Icons.filter_list, color: Colors.white, size: 20),
+              label: const Text(
+                "Lọc", 
+                style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)
+              ),
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
-          _buildSearchHeader(), 
+          _buildSearchHeader(),
           Expanded(
             child: isLoading 
               ? Center(child: CircularProgressIndicator(color: vinhUniBlue)) 
@@ -109,51 +204,25 @@ class _VanBanScreenState extends State<VanBanScreen> {
   Widget _buildSearchHeader() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 5))
-        ]
-      ),
+      color: Colors.white,
       child: Column(
         children: [
           TextField(
             controller: _searchController,
             onSubmitted: (_) => _performSearch(),
             decoration: InputDecoration(
-              hintText: isAiSearch ? "Hỏi AI về nội dung văn bản..." : "Tên văn bản, số hiệu...",
+              hintText: isAiSearch ? "Hỏi trợ lý AI về nội dung..." : "Số hiệu, tên văn bản...",
               prefixIcon: Icon(isAiSearch ? Icons.psychology : Icons.search, color: vinhUniBlue),
-              filled: true,
-              fillColor: Colors.grey.shade100,
-              contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 20),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(30), 
-                borderSide: BorderSide.none
-              ),
-              suffixIcon: IconButton(
-                icon: Icon(Icons.send, color: vinhUniBlue), 
-                onPressed: _performSearch
-              ),
+              filled: true, fillColor: Colors.grey.shade100,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
+              suffixIcon: IconButton(icon: Icon(Icons.send, color: vinhUniBlue), onPressed: _performSearch),
             ),
           ),
-          const SizedBox(height: 8),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text("Chế độ Trợ lý AI", 
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-            subtitle: Text(
-              isAiSearch ? "Đang sử dụng Vector Search để tìm nội dung" : "Tìm kiếm theo nội dung (ngữ nghĩa))",
-              style: const TextStyle(fontSize: 11)
-            ),
+            title: const Text("Chế độ Trợ lý AI", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
             value: isAiSearch,
-            activeColor: vinhUniBlue,
-            onChanged: (val) {
-              setState(() {
-                isAiSearch = val;
-                // Mỗi khi bật/tắt AI, tự động tìm kiếm lại theo chế độ mới
-                _performSearch();
-              });
-            },
+            onChanged: (val) { setState(() { isAiSearch = val; }); _performSearch(); },
           )
         ],
       ),
@@ -162,51 +231,32 @@ class _VanBanScreenState extends State<VanBanScreen> {
 
   Widget _buildDocumentList() {
     if (documents.isEmpty && !isLoading) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.description_outlined, size: 80, color: Colors.grey.shade300),
-            const SizedBox(height: 16),
-            const Text("Không tìm thấy văn bản nào", 
-              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w500)),
-          ],
-        ),
-      );
+      return const Center(child: Text("Không tìm thấy văn bản nào", style: TextStyle(color: Colors.grey)));
     }
-    
     return ListView.builder(
       padding: const EdgeInsets.all(12),
       itemCount: documents.length,
       itemBuilder: (context, index) {
         final doc = documents[index];
+        String rawDate = doc['publish_date'] ?? "";
+        String fmtDate = rawDate.length >= 10 ? rawDate.substring(0, 10).split('-').reversed.join('/') : "Đang cập nhật";
+
         return Card(
-          elevation: 0,
           margin: const EdgeInsets.only(bottom: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(15),
-            side: BorderSide(color: Colors.grey.shade200)
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15), side: BorderSide(color: Colors.grey.shade200)),
           child: ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            leading: Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.red.shade50,
-                borderRadius: BorderRadius.circular(10)
-              ),
-              child: const Icon(Icons.picture_as_pdf, color: Colors.red),
+            contentPadding: const EdgeInsets.all(12),
+            leading: const CircleAvatar(backgroundColor: Color(0xFFFFEBEE), child: Icon(Icons.picture_as_pdf, color: Colors.red)),
+            title: Text(doc['title'] ?? "Văn bản", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 5),
+                Text("Loại: ${doc['category']}", style: const TextStyle(fontSize: 11)),
+                Text("Ngày: $fmtDate", style: const TextStyle(fontSize: 11, color: Colors.orange, fontWeight: FontWeight.bold)),
+              ],
             ),
-            title: Text(
-              doc['title'] ?? "Văn bản không tiêu đề", 
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)
-            ),
-            subtitle: Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text("Loại: ${doc['category'] ?? 'Văn bản'}", 
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-            ),
-            trailing: Icon(Icons.arrow_forward_ios, size: 14, color: Colors.grey.shade400),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 14),
             onTap: () => _openPdf(doc['url'], doc['title']),
           ),
         );
@@ -215,16 +265,120 @@ class _VanBanScreenState extends State<VanBanScreen> {
   }
 }
 
-// Màn hình xem PDF với nút Chia sẻ cố định
-class PdfViewerPage extends StatelessWidget {
+// --- TRANG XEM PDF ---
+class PdfViewerPage extends StatefulWidget {
   final String url;
   final String title;
 
   const PdfViewerPage({super.key, required this.url, required this.title});
 
-  void _sharePdf() {
-    // Sử dụng thư viện share_plus để chia sẻ đường dẫn văn bản
-    Share.share(url);
+  @override
+  State<PdfViewerPage> createState() => _PdfViewerPageState();
+}
+
+class _PdfViewerPageState extends State<PdfViewerPage> {
+  bool _isProcessing = false; // Trạng thái khi đang tải hoặc đang chuẩn bị share
+  double _progress = 0;
+  String _statusText = "";
+
+  // 1. Hàm làm sạch tên file để tránh lỗi hệ thống
+  String _getSafeFileName() {
+    return widget.title.replaceAll(RegExp(r'[\\/*?:"<>|]'), '_');
+  }
+
+  // 2. Hàm xử lý tải file về máy (Lưu vĩnh viễn vào Downloads)
+  Future<void> _downloadPdf() async {
+    if (Platform.isAndroid) {
+      if (await Permission.storage.request().isDenied) {
+        await Permission.manageExternalStorage.request();
+      }
+    }
+
+    setState(() {
+      _isProcessing = true;
+      _progress = 0;
+      _statusText = "Đang tải về máy...";
+    });
+
+    try {
+      Directory? directory;
+      if (Platform.isAndroid) {
+        directory = Directory('/storage/emulated/0/Download');
+        if (!await directory.exists()) {
+          directory = await getExternalStorageDirectory();
+        }
+      } else {
+        directory = await getApplicationDocumentsDirectory();
+      }
+
+      String savePath = "${directory!.path}/${_getSafeFileName()}.pdf";
+
+      await Dio().download(
+        widget.url,
+        savePath,
+        onReceiveProgress: (received, total) {
+          if (total != -1) {
+            setState(() {
+              _progress = received / total;
+            });
+          }
+        },
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("✅ Đã lưu vào thư mục Downloads"), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      _showErrorSnackBar("Không thể tải file về máy.");
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  // 3. Hàm chia sẻ file vật lý (Để giấu link gốc server)
+  Future<void> _sharePhysicalFile() async {
+    setState(() {
+      _isProcessing = true;
+      _progress = 0;
+      _statusText = "Đang chuẩn bị file...";
+    });
+
+    try {
+      // Tải vào thư mục tạm (Temporary Directory)
+      final tempDir = await getTemporaryDirectory();
+      final tempPath = "${tempDir.path}/${_getSafeFileName()}_share.pdf";
+
+      // Tải file về máy trước khi share
+      await Dio().download(
+        widget.url,
+        tempPath,
+        onReceiveProgress: (received, total) {
+          if (total != -1) {
+            setState(() => _progress = received / total);
+          }
+        },
+      );
+
+      // Chia sẻ file vật lý thực tế qua XFile
+      await Share.shareXFiles(
+        [XFile(tempPath)],
+        text: 'Văn bản được chia sẻ từ ứng dụng.',
+      );
+    } catch (e) {
+      _showErrorSnackBar("Không thể chia sẻ văn bản lúc này.");
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
+    }
+  }
+
+  void _showErrorSnackBar(String msg) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("❌ $msg"), backgroundColor: Colors.red),
+      );
+    }
   }
 
   @override
@@ -232,31 +386,60 @@ class PdfViewerPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-            title,
-            style: const TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold)
+          widget.title,
+          style: const TextStyle(fontSize: 14, color: Colors.white, fontWeight: FontWeight.bold),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
-        backgroundColor: const Color(0xFF0054A6), // Màu xanh đặc trưng Đại học Vinh
+        backgroundColor: const Color(0xFF0054A6),
         iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          // Hiển thị vòng xoay tiến độ nếu đang xử lý
+          if (_isProcessing)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: SizedBox(
+                  width: 20, height: 20,
+                  child: CircularProgressIndicator(
+                    value: _progress,
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
+                ),
+              ),
+            )
+          else ...[
+            IconButton(
+              icon: const Icon(Icons.download_for_offline),
+              onPressed: _downloadPdf,
+              tooltip: "Lưu về máy",
+            ),
+            IconButton(
+              icon: const Icon(Icons.share),
+              onPressed: _sharePhysicalFile,
+              tooltip: "Chia sẻ file",
+            ),
+          ],
+        ],
       ),
-
-      // Sử dụng Stack để ép nút Share luôn nằm trên lớp hiển thị của PDF
       body: Stack(
         children: [
-          // Hiển thị nội dung văn bản từ URL
-          SfPdfViewer.network(url),
-
-          // Nút chia sẻ cố định ở góc dưới bên phải
-          Positioned(
-            bottom: 20,
-            right: 20,
-            child: FloatingActionButton(
-              heroTag: "pdf_share_fab", // Tránh lỗi Hero animation nếu có nhiều màn hình
-              onPressed: _sharePdf,
-              backgroundColor: const Color(0xFF0054A6),
-              elevation: 8,
-              child: const Icon(Icons.share, color: Colors.white),
+          SfPdfViewer.network(widget.url),
+          // Hiển thị dòng trạng thái nhỏ khi đang tải/share
+          if (_isProcessing)
+            Positioned(
+              top: 0, left: 0, right: 0,
+              child: Container(
+                color: Colors.black54,
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text(
+                  "$_statusText (${(_progress * 100).toStringAsFixed(0)}%)",
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                  textAlign: TextAlign.center,
+                ),
+              ),
             ),
-          ),
         ],
       ),
     );

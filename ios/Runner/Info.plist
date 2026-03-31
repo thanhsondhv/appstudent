@@ -2,76 +2,85 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
-	<key>CFBundleDevelopmentRegion</key>
-	<string>$(DEVELOPMENT_LANGUAGE)</string>
-	<key>CFBundleDisplayName</key>
-	<string>Vinhuni App</string>
-	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>vinhuni_app</string>
-	<key>CFBundlePackageType</key>
-	<string>APPL</string>
-	<key>CFBundleShortVersionString</key>
-	<string>$(FLUTTER_BUILD_NAME)</string>
-	<key>CFBundleSignature</key>
-	<string>????</string>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLName</key>
-			<string>vinhuni.edu.vn</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>vinhuni-app</string>
-			</array>
-		</dict>
-	</array>
-	<key>CFBundleVersion</key>
-	<string>$(FLUTTER_BUILD_NUMBER)</string>
-	<key>FirebaseAppDelegateProxyEnabled</key>
-	<false/>
-	<key>LSRequiresIPhoneOS</key>
-	<true/>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
 
-	<key>NSLocationWhenInUseUsageDescription</key>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleDisplayName</key>
+    <string>Vinhuni App</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>vinhuni_app</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(FLUTTER_BUILD_NAME)</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleVersion</key>
+    <string>$(FLUTTER_BUILD_NUMBER)</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
+    <key>UIApplicationSupportsIndirectInputEvents</key>
+    <true/>
+
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleURLName</key>
+            <string>vinhuni.edu.vn</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>vinhuni-app</string>
+            </array>
+        </dict>
+    </array>
+
+    <key>NSLocationWhenInUseUsageDescription</key>
     <string>VinhUni cần vị trí của bạn để xác nhận bạn đang ở trong phòng học.</string>
     <key>NSLocationAlwaysUsageDescription</key>
+    <string>VinhUni cần vị trí của bạn để xác nhận điểm danh chính xác.</string>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
     <string>VinhUni cần vị trí của bạn để xác nhận điểm danh chính xác.</string>
 
     <key>NSFaceIDUsageDescription</key>
     <string>VinhUni cần xác thực FaceID để đảm bảo chính chủ điểm danh.</string>
 
+    <key>NSCameraUsageDescription</key>
+    <string>VinhUni cần truy cập Camera để thực hiện nhận diện khuôn mặt sinh viên trong quá trình điểm danh.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>VinhUni cần truy cập Microphone để hỗ trợ quá trình quay phim xác thực (nếu cần).</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>VinhUni cần truy cập thư viện ảnh để cập nhật hồ sơ sinh viên.</string>
 
+    <key>FirebaseAppDelegateProxyEnabled</key>
+    <false/>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>fetch</string>
+        <string>remote-notification</string>
+    </array>
 
-	<key>NSCameraUsageDescription</key>
-	<string>VinhUni cần truy cập Camera để thực hiện nhận diện khuôn mặt sinh viên trong quá trình điểm danh.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>VinhUni cần truy cập Microphone để hỗ trợ quá trình quay phim xác thực (nếu cần).</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>VinhUni cần truy cập thư viện ảnh để cập nhật hồ sơ sinh viên.</string>
-	<key>UIApplicationSupportsIndirectInputEvents</key>
-	<true/>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>fetch</string>
-		<string>remote-notification</string>
-	</array>
-	<key>UILaunchStoryboardName</key>
-	<string>LaunchScreen</string>
-	<key>UIMainStoryboardFile</key>
-	<string>Main</string>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-	</array>
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIMainStoryboardFile</key>
+    <string>Main</string>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+    </array>
 </dict>
 </plist>

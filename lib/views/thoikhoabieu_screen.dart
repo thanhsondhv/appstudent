@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../services/database_helper.dart'; // 🔥 Dòng quan trọng nhất để sửa lỗi của bạn
 
 class ThoiKhoaBieuScreen extends StatefulWidget {
   const ThoiKhoaBieuScreen({super.key});
@@ -39,10 +40,11 @@ class _ThoiKhoaBieuScreenState extends State<ThoiKhoaBieuScreen> {
   }
 
   // =========================================================================
-  // 1. LUỒNG INIT DATA (XỬ LÝ OFFLINE FIRST TOÀN DIỆN)
+  // 1. LUỒNG KHỞI TẠO (CƠ CHẾ CACHE-FIRST)
   // =========================================================================
   Future<void> _initData() async {
     setState(() { isLoading = true; errorMessage = null; });
+    final db = DatabaseHelper.instance;
     
     final prefs = await SharedPreferences.getInstance();
     final String? userId = prefs.getString('user_code') ?? prefs.getString('user_id');
@@ -54,184 +56,166 @@ class _ThoiKhoaBieuScreenState extends State<ThoiKhoaBieuScreen> {
     currentUserId = userId;
 
     try {
-      // 1. Tải danh sách ngành (Có hỗ trợ Offline)
+      // A. Đọc bộ lọc từ máy (Hiện Năm/Kỳ/Tuần ngay lập tức)
+      final cachedFilters = await db.getScheduleFilters(currentUserId);
+      if (cachedFilters != null && cachedFilters.isNotEmpty) {
+        _processFilters(cachedFilters);
+        // Hiện lịch cũ từ máy lên trước (0.1 giây)
+        _fetchSchedule(currentUserId, useCacheOnly: true); 
+      }
+
+      // B. Gọi mạng âm thầm cập nhật dữ liệu mới
       await _fetchPrograms(currentUserId);
-      
-      // 2. Tải danh sách bộ lọc Năm/Kỳ (Có hỗ trợ Offline)
-      await _fetchFilters(currentUserId);
-
-      // 3. Nếu có bộ lọc thì cập nhật Combobox và tải Lịch
-      if (rawFilterData.isNotEmpty) {
-        listNamHoc = rawFilterData.map((e) => e['nam'].toString()).toSet().toList();
-        listNamHoc.sort((a, b) => b.compareTo(a));
-        selectedNamHoc = listNamHoc.first;
-
-        _updateFilters(updateNam: true);
-
-        // 4. Tải Lịch học (Có hỗ trợ Offline)
-        await _fetchSchedule(currentUserId);
-      } else {
-        setState(() { errorMessage = "Không có dữ liệu bộ lọc."; isLoading = false; });
-      }
-    } catch (e) {
-      // Chỉ báo lỗi nếu không có cả mạng lẫn cache
-      if (scheduleData.isEmpty && programList.length == 1) {
-        setState(() { errorMessage = "Không có kết nối mạng và chưa có dữ liệu ngoại tuyến!"; isLoading = false; });
-      }
-    }
-  }
-
-  // =========================================================================
-  // 2. TẢI COMBOBOX NGÀNH HỌC (CÓ CACHE)
-  // =========================================================================
-  Future<void> _fetchPrograms(String userId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final cacheKey = 'cache_programs_$userId';
-
-    // 1. Đọc Cache trước
-    final cachedStr = prefs.getString(cacheKey);
-    if (cachedStr != null) {
-      final List<dynamic> data = json.decode(cachedStr);
-      programList = [
-        {"program_id": "ALL", "program_name": "Tất cả ngành học"},
-        ...data.map((e) => {"program_id": e["program_id"].toString(), "program_name": e["program_name"].toString()})
-      ];
-    }
-
-    // 2. Gọi API ngầm
-    try {
-      final url = 'https://mobi.vinhuni.edu.vn/api/student-programs/$userId'; 
+      final url = 'https://mobi.vinhuni.edu.vn/api/get-filters/$currentUserId';
       final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
       
       if (response.statusCode == 200) {
-        prefs.setString(cacheKey, response.body); // Lưu đè cache
-        final List<dynamic> data = json.decode(response.body);
-        setState(() {
-          programList = [
-            {"program_id": "ALL", "program_name": "Tất cả ngành học"},
-            ...data.map((e) => {"program_id": e["program_id"].toString(), "program_name": e["program_name"].toString()})
-          ];
-        });
+        final List<dynamic> newData = json.decode(response.body);
+        await db.saveScheduleFilters(currentUserId, newData); // Lưu cache SQLite
+        _processFilters(newData);
+        await _fetchSchedule(currentUserId); // Cập nhật bản mới từ mạng
       }
     } catch (e) {
-      debugPrint("Offline: Dùng cache cho Combobox Ngành");
-      if (programList.length == 1) throw Exception("No network"); // Ném lỗi ra initData nếu không có cache
+      if (scheduleData.isEmpty) setState(() => isLoading = false);
     }
   }
 
-  // =========================================================================
-  // 3. TẢI BỘ LỌC NĂM HỌC / HỌC KỲ (CÓ CACHE)
-  // =========================================================================
-  Future<void> _fetchFilters(String userId) async {
-    final prefs = await SharedPreferences.getInstance();
-    final cacheKey = 'cache_filters_$userId';
-
-    // 1. Đọc Cache
-    final cachedStr = prefs.getString(cacheKey);
-    if (cachedStr != null) {
-      rawFilterData = json.decode(cachedStr);
-    }
-
-    // 2. Gọi API ngầm
-    try {
-      final url = 'https://mobi.vinhuni.edu.vn/api/get-filters/$userId';
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        prefs.setString(cacheKey, response.body);
-        rawFilterData = json.decode(response.body);
-      }
-    } catch (e) {
-      debugPrint("Offline: Dùng cache cho Combobox Bộ lọc");
-      if (rawFilterData.isEmpty) throw Exception("No network");
-    }
-  }
-
-  // =========================================================================
-  // LOGIC CẬP NHẬT COMBOBOX CON KHI CHỌN NĂM/KỲ
-  // =========================================================================
-  void _updateFilters({bool updateNam = false, bool updateKy = false}) {
+  void _processFilters(List data) {
     setState(() {
-      if (updateNam) {
-        listHocKy = rawFilterData.where((e) => e['nam'].toString() == selectedNamHoc).map((e) => e['ky'].toString()).toSet().toList();
-        listHocKy.sort();
-        if(listHocKy.isNotEmpty) selectedHocKy = listHocKy.first;
+      rawFilterData = data;
+      listNamHoc = data.map((e) => e['nam'].toString()).toSet().toList();
+      listNamHoc.sort((a, b) => b.compareTo(a));
+      
+      if (selectedNamHoc.isEmpty || !listNamHoc.contains(selectedNamHoc)) {
+        selectedNamHoc = listNamHoc.isNotEmpty ? listNamHoc.first : "";
       }
-      listTuan = rawFilterData.where((e) => e['nam'].toString() == selectedNamHoc && e['ky'].toString() == selectedHocKy).map((e) => e['tuan'].toString()).toSet().toList();
-      List<int> intTuans = listTuan.map((e) => int.parse(e)).toList();
-      intTuans.sort();
-      listTuan = intTuans.map((e) => e.toString()).toList();
-      if(listTuan.isNotEmpty) selectedTuan = listTuan.first;
+      _updateFilters(updateNam: true);
     });
   }
 
   // =========================================================================
-  // 4. TẢI LỊCH HỌC CHÍNH THỨC (CÓ CACHE)
+  // 2. LẤY LỊCH HỌC (CACHE + API)
   // =========================================================================
-  // Đã sửa FFuture thành Future
-Future<void> _fetchSchedule(String userId) async {
-  final prefs = await SharedPreferences.getInstance();
-  String cacheKey = 'cache_schedule_${userId}_${selectedNamHoc}_${selectedHocKy}_${selectedTuan}_$selectedProgramId';
+  Future<void> _fetchSchedule(String userId, {bool useCacheOnly = false}) async {
+    final db = DatabaseHelper.instance;
+    String nam = selectedNamHoc;
+    String ky = selectedHocKy;
+    String tuan = selectedTuan;
+    String prog = selectedProgramId;
 
-  // 🔥 BƯỚC QUAN TRỌNG: Tạm thời xóa cache để chắc chắn lấy dữ liệu mới có MaLopHP
-  await prefs.remove(cacheKey); 
+    // A. Đọc máy hiện lên trước (Khử xoay)
+    final cached = await db.getSchedule(userId, nam, ky, tuan, prog);
+    if (cached != null) {
+      setState(() {
+        scheduleData = cached;
+        isLoading = false; 
+      });
+    } else if (!useCacheOnly) {
+      setState(() => isLoading = true); 
+    }
 
-  setState(() => isLoading = true); 
+    if (useCacheOnly) return;
 
-  try {
-    String nam = selectedNamHoc == "Tất cả" ? "ALL" : selectedNamHoc;
-    String ky = selectedHocKy == "Tất cả" ? "ALL" : selectedHocKy;
-    
-    final url = 'https://mobi.vinhuni.edu.vn/api/get-schedule/$userId?nam_hoc=$nam&hoc_ky=$ky&tuan=$selectedTuan&program_id=$selectedProgramId';
-    
-    final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 8));
-    if (response.statusCode == 200) {
-      final List<dynamic> data = json.decode(response.body);
+    // B. Gọi mạng cập nhật
+    try {
+      final url = 'https://mobi.vinhuni.edu.vn/api/get-schedule/$userId?nam_hoc=$nam&hoc_ky=$ky&tuan=$tuan&program_id=$prog';
+      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 8));
       
-      // Lưu lại bản cache mới nhất (đã có trường MaLopHP)
-      await prefs.setString(cacheKey, json.encode(data));
-      
-      if (mounted) {
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        await db.saveSchedule(userId, nam, ky, tuan, prog, data); // Lưu cache
+        
+        if (mounted) {
+          setState(() {
+            scheduleData = data;
+            isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  // =========================================================================
+  // 3. LOGIC HỖ TRỢ (NGÀNH, BỘ LỌC)
+  // =========================================================================
+  Future<void> _fetchPrograms(String userId) async {
+    try {
+      final url = 'https://mobi.vinhuni.edu.vn/api/student-programs/$userId'; 
+      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
         setState(() {
-          scheduleData = data;
-          isLoading = false;
+          programList = [
+            {"program_id": "ALL", "program_name": "Tất cả ngành học"},
+            ...data.map((e) => {
+              "program_id": e["program_id"].toString(), 
+              "program_name": e["program_name"].toString()
+            })
+          ];
         });
       }
-    }
-  } catch (e) {
-    if (mounted) setState(() => isLoading = false);
+    } catch (e) { debugPrint("Offline programs: $e"); }
   }
-}
 
+  void _updateFilters({bool updateNam = false}) {
+    setState(() {
+      if (updateNam) {
+        listHocKy = rawFilterData
+            .where((e) => e['nam'].toString() == selectedNamHoc)
+            .map((e) => e['ky'].toString())
+            .toSet().toList();
+        listHocKy.sort();
+        if (selectedHocKy.isEmpty || !listHocKy.contains(selectedHocKy)) {
+          selectedHocKy = listHocKy.isNotEmpty ? listHocKy.first : "";
+        }
+      }
+
+      listTuan = rawFilterData
+          .where((e) => e['nam'].toString() == selectedNamHoc && e['ky'].toString() == selectedHocKy)
+          .map((e) => e['tuan'].toString())
+          .toSet().toList();
+      
+      List<int> intTuans = listTuan.map((e) => int.tryParse(e) ?? 0).toList();
+      intTuans.sort();
+      listTuan = intTuans.map((e) => e.toString()).toList();
+      
+      if (selectedTuan.isEmpty || !listTuan.contains(selectedTuan)) {
+        selectedTuan = listTuan.isNotEmpty ? listTuan.first : "";
+      }
+    });
+  }
+
+  // =========================================================================
+  // 4. GIAO DIỆN CHÍNH
+  // =========================================================================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F2F5),
       appBar: AppBar(
-        // Bổ sung nút Back thủ công để đảm bảo luôn xuất hiện trên mọi luồng Navigator
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
-          onPressed: () {
-            // Sử dụng maybePop để quay lại an toàn, tránh đóng app đột ngột
-            Navigator.of(context).maybePop();
-          },
+          onPressed: () => Navigator.of(context).maybePop(),
         ),
-        title: const Text(
-          "Thời Khóa Biểu", 
-          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 18)
-        ),
+        title: const Text("Thời Khóa Biểu", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 18)),
         backgroundColor: vinhUniBlue, 
         centerTitle: true,
-        elevation: 0, // Làm phẳng AppBar để mượt mà hơn với FilterBar bên dưới
+        elevation: 0,
       ),
       body: Column(
         children: [
           _buildFilterBar(),
           Expanded(
-            child: isLoading
+            child: isLoading && scheduleData.isEmpty
                 ? Center(child: CircularProgressIndicator(color: vinhUniBlue))
-                : errorMessage != null
+                : errorMessage != null && scheduleData.isEmpty
                 ? _buildErrorView()
-                : _buildList(),
+                : RefreshIndicator(
+                    onRefresh: () => _fetchSchedule(currentUserId),
+                    child: _buildList(),
+                  ),
           ),
         ],
       ),
@@ -264,26 +248,13 @@ Future<void> _fetchSchedule(String userId) async {
           const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(child: _buildDropdown("Năm học", selectedNamHoc, listNamHoc, (val) { selectedNamHoc = val!; _updateFilters(updateNam: true); })),
+              Expanded(child: _buildDropdown("Năm học", selectedNamHoc, listNamHoc, (val) { selectedNamHoc = val!; _updateFilters(updateNam: true); _fetchSchedule(currentUserId); })),
               const SizedBox(width: 12),
-              Expanded(child: _buildDropdown("Học kỳ", selectedHocKy, listHocKy, (val) { selectedHocKy = val!; _updateFilters(); })),
+              Expanded(child: _buildDropdown("Học kỳ", selectedHocKy, listHocKy, (val) { selectedHocKy = val!; _updateFilters(); _fetchSchedule(currentUserId); })),
             ],
           ),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(flex: 2, child: _buildDropdown("Tuần học", selectedTuan, listTuan, (val) => setState(() => selectedTuan = val!), prefixIcon: Icons.calendar_view_week_rounded)),
-              const SizedBox(width: 12),
-              SizedBox(
-                height: 48,
-                child: ElevatedButton(
-                  onPressed: () => _fetchSchedule(currentUserId),
-                  style: ElevatedButton.styleFrom(backgroundColor: vinhUniBlue, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                  child: const Text("Lọc", style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ),
-            ],
-          ),
+          _buildDropdown("Tuần học", selectedTuan, listTuan, (val) { setState(() => selectedTuan = val!); _fetchSchedule(currentUserId); }, prefixIcon: Icons.calendar_view_week_rounded),
         ],
       ),
     );
@@ -295,28 +266,17 @@ Future<void> _fetchSchedule(String userId) async {
       isExpanded: true, menuMaxHeight: 300,
       decoration: InputDecoration(
         labelText: label, labelStyle: TextStyle(fontSize: 13, color: vinhUniBlue),
-        filled: true, fillColor: Colors.grey.shade50, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade300)),
+        filled: true, fillColor: Colors.grey.shade50, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: Colors.grey.shade200)),
         prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 18, color: vinhUniBlue) : null,
       ),
-      items: items.map((e) => DropdownMenuItem(value: e, child: Text(label == "Tuần học" ? "Tuần $e" : e, style: const TextStyle(fontSize: 14)))).toList(),
+      items: items.map((e) => DropdownMenuItem(value: e, child: Text(label == "Tuần học" ? "Tuần $e" : e, style: const TextStyle(fontSize: 13)))).toList(),
       onChanged: onChanged,
     );
   }
 
   Widget _buildList() {
-    if (scheduleData.isEmpty) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.event_busy_rounded, size: 50, color: Colors.grey),
-            SizedBox(height: 10),
-            Text("Không có lịch học trong tuần này", style: TextStyle(color: Colors.grey)),
-          ],
-        )
-      );
-    }
+    if (scheduleData.isEmpty) return _buildEmptyView();
 
     return ListView.builder(
       padding: const EdgeInsets.all(16),
@@ -324,34 +284,18 @@ Future<void> _fetchSchedule(String userId) async {
       itemBuilder: (context, index) {
         final item = scheduleData[index];
         
-        // Làm sạch nội dung text (Xử lý các tag HTML cơ bản)
-        String rawNoiDung = item['NoiDung'].toString()
-            .replaceAll('<b>', '')
-            .replaceAll('</b>', '')
-            .replaceAll('<br>', '\n')
-            .replaceAll('📍 ', '')
-            .replaceAll('⏰ ', '')
-            .replaceAll('📅 ', '');
+        // 🔥 FIX LỖI TYPE: Luôn dùng .toString()
+        String rawNoiDung = item['NoiDung']?.toString() ?? "";
+        rawNoiDung = rawNoiDung.replaceAll('<b>', '').replaceAll('</b>', '').replaceAll('<br>', '\n').replaceAll('📍 ', '').replaceAll('⏰ ', '').replaceAll('📅 ', '');
 
         return Container(
           margin: const EdgeInsets.only(bottom: 16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(15),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.03),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              )
-            ],
-          ),
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))]),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(15),
             child: IntrinsicHeight(
               child: Row(
                 children: [
-                  // Thanh màu xanh bên trái tạo điểm nhấn
                   Container(width: 5, color: vinhUniBlue),
                   Expanded(
                     child: Padding(
@@ -359,59 +303,23 @@ Future<void> _fetchSchedule(String userId) async {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // 1. Tên học phần
-                          Text(
-                            item['TenHocPhan'] ?? "Môn học",
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                              color: Color(0xFF1E293B),
-                            ),
-                          ),
+                          Text(item['TenHocPhan']?.toString() ?? "Môn học", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1E293B))),
+                          const SizedBox(height: 8),
+                          Row(children: [
+                            Icon(Icons.calendar_today_rounded, size: 13, color: vinhUniBlue.withOpacity(0.7)),
+                            const SizedBox(width: 8),
+                            Text(item['NgayThi']?.toString() ?? "", style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                          ]),
+                          const Divider(height: 20),
+                          Text(rawNoiDung, style: const TextStyle(height: 1.4, fontSize: 13, color: Color(0xFF475569))),
                           const SizedBox(height: 10),
-
-                          // 2. Thời gian (Ngày tháng)
-                          Row(
-                            children: [
-                              Icon(Icons.calendar_today_rounded, size: 14, color: vinhUniBlue.withOpacity(0.7)),
-                              const SizedBox(width: 8),
-                              Text(
-                                item['NgayThi'] ?? "",
-                                style: const TextStyle(color: Colors.black54, fontSize: 13),
-                              ),
-                            ],
-                          ),
-                          
-                          const Divider(height: 24, thickness: 0.5),
-
-                          // 3. Nội dung chi tiết (Phòng học, Tiết học, Giảng viên)
-                          Text(
-                            rawNoiDung,
-                            style: const TextStyle(
-                              height: 1.5,
-                              fontSize: 13,
-                              color: Color(0xFF475569),
-                            ),
-                          ),
-
-                          const SizedBox(height: 12),
-                          const Divider(height: 1, thickness: 0.5),
-                          
-                          // 4. 🔥 NÚT XIN NGHỈ / ĐI MUỘN (Tích hợp mới)
                           Align(
                             alignment: Alignment.centerRight,
                             child: TextButton.icon(
                               onPressed: () => _showAttendanceRequestSheet(item),
-                              style: TextButton.styleFrom(
-                                foregroundColor: Colors.orange.shade800,
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              ),
-                              icon: const Icon(Icons.edit_calendar_rounded, size: 18),
-                              label: const Text(
-                                "Xin nghỉ / Đi muộn",
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                              ),
+                              icon: const Icon(Icons.edit_calendar_rounded, size: 16),
+                              label: const Text("Xin nghỉ / Đi muộn", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                              style: TextButton.styleFrom(foregroundColor: Colors.orange.shade800),
                             ),
                           ),
                         ],
@@ -426,90 +334,37 @@ Future<void> _fetchSchedule(String userId) async {
       },
     );
   }
-  // Hàm hiển thị thông báo nhanh (SnackBar)
-void _showSnack(String message, Color color) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(message),
-      backgroundColor: color,
-      behavior: SnackBarBehavior.floating,
-      margin: const EdgeInsets.all(10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ),
-  );
-}
 
-// Hàm trang trí ô nhập liệu (InputDecoration)
-InputDecoration _inputDecor(String label, IconData icon) {
-  return InputDecoration(
-    labelText: label,
-    labelStyle: const TextStyle(fontSize: 14),
-    prefixIcon: Icon(icon, color: vinhUniBlue, size: 20),
-    filled: true,
-    fillColor: Colors.grey.shade50,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: BorderSide(color: Colors.grey.shade300),
-    ),
-    enabledBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: BorderSide(color: Colors.grey.shade200),
-    ),
-    focusedBorder: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: BorderSide(color: vinhUniBlue, width: 1.5),
-    ),
-  );
-}
-  // --- 1. GIAO DIỆN BOTTOM SHEET XIN PHÉP ---
+  // =========================================================================
+  // 5. XIN NGHỈ HỌC
+  // =========================================================================
   void _showAttendanceRequestSheet(dynamic item) {
-  // 🚩 Dòng Debug cực kỳ quan trọng để kiểm tra mã lớp
-  debugPrint("🔍 Kiểm tra dữ liệu môn học: $item");
-  debugPrint("👉 MaLopHP: ${item['MaLopHP']}");
+    String? lhpCode = item['MaLopHP']?.toString();
+    if (lhpCode == null || lhpCode.isEmpty || lhpCode == "null") {
+      _showSnack("Lỗi: Không tìm thấy mã lớp học phần!", Colors.red);
+      return;
+    }
 
-  if (item['MaLopHP'] == null || item['MaLopHP'] == "" || item['MaLopHP'] == "None") {
-    _showSnack("Lỗi: Không tìm thấy mã lớp học phần. Vui lòng nhấn 'Lọc' để cập nhật lại lịch!", Colors.red);
-    return;
-  }
+    String selectedType = 'VANG_HOC';
+    final TextEditingController reasonCtrl = TextEditingController();
 
-  String selectedType = 'VANG_HOC';
-  final TextEditingController reasonCtrl = TextEditingController();
-
-  showModalBottomSheet(
-    context: context,
-    isScrollControlled: true, 
-    backgroundColor: Colors.transparent,
-    builder: (ctx) => StatefulBuilder(
-      builder: (BuildContext context, StateSetter setModalState) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
-          ),
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-            left: 20, right: 20, top: 20,
-          ),
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true, 
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) => Container(
+          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom + 20, left: 20, right: 20, top: 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Center(
-                child: Container(
-                  width: 40, height: 4, 
-                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))
-                )
-              ),
+              Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)))),
               const SizedBox(height: 20),
-              Text("XIN PHÉP VẮNG / MUỘN", 
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: vinhUniBlue)),
-              const SizedBox(height: 8),
-              Text("Môn: ${item['TenHocPhan'] ?? 'Môn học'}", 
-                style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w500)),
+              Text("XIN PHÉP VẮNG / MUỘN", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: vinhUniBlue)),
+              Text("Môn: ${item['TenHocPhan']}", style: const TextStyle(fontSize: 13, color: Colors.black87)),
               const Divider(height: 30),
-
-              // Dropdown chọn loại hình xin phép
               DropdownButtonFormField<String>(
                 value: selectedType,
                 decoration: _inputDecor("Hình thức xin phép", Icons.category_rounded),
@@ -518,91 +373,46 @@ InputDecoration _inputDecor(String label, IconData icon) {
                   DropdownMenuItem(value: 'MUON_HOC', child: Text("Đi muộn (Vào sau)")),
                   DropdownMenuItem(value: 'LY_DO_KHAC', child: Text("Lý do khác")),
                 ],
-                onChanged: (v) {
-                  // Cập nhật giao diện bên trong BottomSheet
-                  setModalState(() => selectedType = v!);
-                },
+                onChanged: (v) => setModalState(() => selectedType = v!),
               ),
               const SizedBox(height: 15),
-
-              // Ô nhập lý do
-              TextField(
-                controller: reasonCtrl,
-                maxLines: 3,
-                decoration: _inputDecor("Nhập lý do chi tiết...", Icons.edit_note_rounded),
-              ),
-              const SizedBox(height: 25),
-
-              // Nút gửi đơn
+              TextField(controller: reasonCtrl, maxLines: 3, decoration: _inputDecor("Nhập lý do chi tiết...", Icons.edit_note_rounded)),
+              const SizedBox(height: 20),
               SizedBox(
-                width: double.infinity,
-                height: 55,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange.shade700,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                    elevation: 0,
-                  ),
-                  onPressed: () {
-                    // Truyền MaLopHP từ item sang hàm gửi
-                    _submitAttendanceRequest(item['MaLopHP'], selectedType, reasonCtrl.text);
-                  },
-                  icon: const Icon(Icons.send_rounded),
-                  label: const Text("GỬI ĐƠN XIN PHÉP", style: TextStyle(fontWeight: FontWeight.bold)),
+                width: double.infinity, height: 50,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade700, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  onPressed: () => _submitAttendanceRequest(lhpCode, selectedType, reasonCtrl.text),
+                  child: const Text("GỬI ĐƠN XIN PHÉP", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
                 ),
               ),
             ],
           ),
-        );
-      },
-    ),
-  );
-}
-  // --- 2. LOGIC GỬI ĐƠN LÊN SERVER ---
-  Future<void> _submitAttendanceRequest(String? lhpCode, String category, String reason) async {
-    if (reason.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Vui lòng nhập lý do!")));
-      return;
-    }
+        ),
+      ),
+    );
+  }
 
-    // Hiển thị Loading
+  Future<void> _submitAttendanceRequest(String lhpCode, String category, String reason) async {
+    if (reason.trim().isEmpty) { _showSnack("Vui lòng nhập lý do!", Colors.orange); return; }
     showDialog(context: context, barrierDismissible: false, builder: (ctx) => const Center(child: CircularProgressIndicator()));
-
     try {
-      final body = {
-        "student_id": currentUserId,
-        "lhp_code": lhpCode, // Mã lớp học phần
-        "category": category,
-        "reason": reason
-      };
-
       final res = await http.post(
         Uri.parse("https://mobi.vinhuni.edu.vn/api/student/send-attendance-request"),
         headers: {"Content-Type": "application/json"},
-        body: jsonEncode(body),
+        body: jsonEncode({"student_id": currentUserId, "lhp_code": lhpCode, "category": category, "reason": reason}),
       ).timeout(const Duration(seconds: 10));
-
-      Navigator.pop(context); // Tắt Loading
-
+      Navigator.pop(context); // Tắt loading
       if (res.statusCode == 200) {
         Navigator.pop(context); // Đóng BottomSheet
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Gửi đơn thành công! Thầy/Cô sẽ nhận được tin nhắn của bạn."), backgroundColor: Colors.green)
-        );
-      } else {
-        throw Exception("Lỗi server");
+        _showSnack("Gửi đơn thành công!", Colors.green);
       }
-    } catch (e) {
-      Navigator.pop(context); // Tắt Loading
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Không thể gửi đơn, vui lòng thử lại sau!"), backgroundColor: Colors.red));
-    }
+    } catch (e) { Navigator.pop(context); _showSnack("Lỗi kết nối server!", Colors.red); }
   }
-  Widget _buildErrorView() {
-    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Text(errorMessage ?? "Lỗi", style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-      const SizedBox(height: 16),
-      ElevatedButton(onPressed: _initData, child: const Text("Thử lại"))
-    ]));
-  }
+
+  // --- HELPERS ---
+  void _showSnack(String m, Color c) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), backgroundColor: c, behavior: SnackBarBehavior.floating, margin: const EdgeInsets.all(10)));
+  InputDecoration _inputDecor(String l, IconData i) => InputDecoration(labelText: l, prefixIcon: Icon(i, color: vinhUniBlue, size: 20), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)));
+  Widget _buildEmptyView() => const Center(child: Text("Không có lịch học", style: TextStyle(color: Colors.grey)));
+  Widget _buildErrorView() => Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Text(errorMessage ?? "Lỗi"), TextButton(onPressed: _initData, child: const Text("Thử lại"))]));
 }

@@ -258,41 +258,28 @@ class _LogInWidgetState extends State<LogInWidget> with SingleTickerProviderStat
   void _processLoginUri(Uri uri) async {
     if (!mounted) return;
 
-    // 1. Kiểm tra xem link có đúng định dạng đăng nhập thành công không
-    // Chấp nhận cả: vinhuni-app://login_success hoặc link có chứa 'login-success'
     bool isSuccess = (uri.scheme == 'vinhuni-app' && uri.host == 'login_success') || 
                      (uri.path.contains('login-success'));
 
     if (isSuccess) {
-      // 2. Trích xuất thông tin từ các tham số (Parameters) trên URL
-      final String? rawUserId = uri.queryParameters['user_id']; // VD: CB1679 hoặc ntson
+      final String? rawUserId = uri.queryParameters['user_id'];
       final String name = uri.queryParameters['name'] ?? "Thành viên VinhUni";
-      final String? role = uri.queryParameters['role'];
+      final String role = uri.queryParameters['role'] ?? "CanBo"; // 🔥 Mặc định là CanBo nếu link Microsoft
 
       if (rawUserId != null && rawUserId.isNotEmpty) {
-        // 🔥 3. ÉP LẤY MÃ SỐ: Chuyển CB1679 -> 1679 để load Avatar và Thông báo chuẩn
+        // Làm sạch ID
         String numericId = rawUserId.replaceAll(RegExp(r'[^0-9]'), '');
-        
-        // Nếu kết quả lọc số bị rỗng (trường hợp userId toàn chữ), thì dùng lại mã gốc
         final String finalId = numericId.isEmpty ? rawUserId : numericId;
 
-        debugPrint("🔗 [DeepLink] Xử lý thành công: $rawUserId -> ID chuẩn: $finalId");
+        _showSnackBar("Đang đồng bộ cổng thông tin cán bộ...", vinhUniBlue);
 
-        // 4. Hiển thị thông báo trạng thái cho người dùng
-        _showSnackBar("Đang đồng bộ tài khoản liên kết...", vinhUniBlue);
-
-        // 🔥 5. TIẾN VÀO HOME
-        // Lưu ý: Đăng nhập qua Link (Microsoft) thường không có mật khẩu (Password),
-        // nên chúng ta sẽ cho người dùng vào thẳng Home mà không hiện Dialog đăng ký Face ID.
-        // (Face ID sẽ được yêu cầu đăng ký ở lần Đăng nhập bằng Mật khẩu tiếp theo).
+        // 🔥 PHẢI CÓ AWAIT Ở ĐÂY để lưu xong mới nhảy màn hình
         await LoginHandler.executeSuccessfulLogin(
           context, 
           finalId, 
           name, 
           role: role
         );
-      } else {
-        _showErrorSnackBar("Dữ liệu định danh từ hệ thống liên kết không hợp lệ!");
       }
     }
   }

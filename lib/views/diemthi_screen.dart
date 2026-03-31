@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../services/diemthi.dart';
+import '../services/database_helper.dart'; // 🔥 Sửa lỗi DatabaseHelper
 
 class DiemThiScreen extends StatefulWidget {
   const DiemThiScreen({super.key});
@@ -37,8 +38,11 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
     _initData();
   }
 
+  // --- 1. KHỞI TẠO DỮ LIỆU (CƠ CHẾ CACHE-FIRST) ---
   Future<void> _initData() async {
     setState(() { isLoading = true; errorMessage = null; });
+    final db = DatabaseHelper.instance;
+
     try {
       final prefs = await SharedPreferences.getInstance();
       final String? userId = prefs.getString('user_id');
@@ -48,32 +52,89 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
         return;
       }
 
-      // 1. Tải danh sách bộ lọc Năm học / Học kỳ từ SQL
-      rawFilterData = await _service.getRawFilters(userId);
-      
-      // 2. Tải danh sách Ngành học
+      // A. HIỆN BỘ LỌC TỪ CACHE NGAY LẬP TỨC
+      final cachedFilters = await db.getGradeFilters(userId);
+      if (cachedFilters != null && cachedFilters.isNotEmpty) {
+        _processFilters(cachedFilters);
+        _fetchGrades(userId, useCacheOnly: true); // Hiện điểm cũ từ máy luôn
+      }
+
+      // B. TẢI NGÀNH & BỘ LỌC MỚI TỪ API (Âm thầm)
       await _fetchPrograms(userId);
+      rawFilterData = await _service.getRawFilters(userId);
 
       if (rawFilterData.isNotEmpty) {
-        // Lấy danh sách năm và thêm tùy chọn "Tất cả"
-        var nams = rawFilterData.map((e) => e['nam'].toString()).toSet().toList();
-        nams.sort((a, b) => b.compareTo(a));
-        
-        setState(() {
-          listNamHoc = ["Tất cả", ...nams];
-          selectedNamHoc = listNamHoc.first;
-          _updateKys();
-        });
-        
-        await _fetchGrades(userId);
-      } else {
+        await db.saveGradeFilters(userId, rawFilterData); // Lưu cache vào SQLite
+        _processFilters(rawFilterData);
+        await _fetchGrades(userId); // Cập nhật bản mới từ mạng
+      } else if (gradeData.isEmpty && cachedFilters == null) {
         setState(() { errorMessage = "Không tìm thấy dữ liệu bộ lọc"; isLoading = false; });
       }
     } catch (e) {
-      setState(() { errorMessage = "Lỗi kết nối hệ thống!"; isLoading = false; });
+      if (gradeData.isEmpty) {
+        setState(() { errorMessage = "Lỗi kết nối hệ thống!"; isLoading = false; });
+      }
     }
   }
 
+  void _processFilters(List data) {
+    setState(() {
+      rawFilterData = data;
+      // Ép kiểu String cho năm để tránh lỗi Type
+      var nams = data.map((e) => e['nam'].toString()).toSet().toList();
+      nams.sort((a, b) => b.compareTo(a));
+      listNamHoc = ["Tất cả", ...nams];
+      
+      if (selectedNamHoc.isEmpty || !listNamHoc.contains(selectedNamHoc)) {
+        selectedNamHoc = listNamHoc.first;
+      }
+      _updateKys();
+    });
+  }
+
+  // --- 2. TẢI BẢNG ĐIỂM (DUY NHẤT 1 HÀM) ---
+  Future<void> _fetchGrades(String userId, {bool useCacheOnly = false}) async {
+    final db = DatabaseHelper.instance;
+    String nam = selectedNamHoc == "Tất cả" ? "ALL" : selectedNamHoc;
+    String ky = selectedHocKy == "Tất cả" ? "ALL" : selectedHocKy;
+    String prog = selectedProgramId;
+
+    // A. ĐỌC TỪ SQLITE HIỆN LÊN TRƯỚC (0.1 giây)
+    final cached = await db.getGrades(userId, nam, ky, prog);
+    if (cached != null) {
+      setState(() {
+        gradeData = cached;
+        isLoading = false; 
+      });
+    } else if (!useCacheOnly) {
+      setState(() => isLoading = true); 
+    }
+
+    if (useCacheOnly) return;
+
+    // B. GỌI API ĐỒNG BỘ BẢN MỚI
+    try {
+      final url = 'https://mobi.vinhuni.edu.vn/api/get-grades/$userId?nam_hoc=$nam&hoc_ky=$ky&program_id=$prog';
+      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        await db.saveGrades(userId, nam, ky, prog, data); // Lưu lại vào SQLite
+        
+        if (mounted) {
+          setState(() {
+            gradeData = data;
+            isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("Offline mode: Đang hiển thị điểm từ cache.");
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  // --- 3. CÁC HÀM HỖ TRỢ ---
   Future<void> _fetchPrograms(String userId) async {
     try {
       final url = 'https://mobi.vinhuni.edu.vn/api/student-programs/$userId'; 
@@ -111,27 +172,6 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
     });
   }
 
-  Future<void> _fetchGrades(String userId) async {
-    setState(() => isLoading = true);
-    try {
-      String nam = selectedNamHoc == "Tất cả" ? "ALL" : selectedNamHoc;
-      String ky = selectedHocKy == "Tất cả" ? "ALL" : selectedHocKy;
-      final url = 'https://mobi.vinhuni.edu.vn/api/get-grades/$userId?nam_hoc=$nam&hoc_ky=$ky&program_id=$selectedProgramId';
-      
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        setState(() {
-          gradeData = json.decode(response.body);
-          isLoading = false;
-        });
-      } else {
-        setState(() { gradeData = []; isLoading = false; });
-      }
-    } catch (e) {
-      setState(() { isLoading = false; errorMessage = "Lỗi tải bảng điểm"; });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -151,9 +191,17 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
         children: [
           _buildFilterBar(),
           Expanded(
-            child: isLoading
+            child: isLoading && gradeData.isEmpty
                 ? Center(child: CircularProgressIndicator(color: vinhUniBlue))
-                : errorMessage != null ? _buildErrorView() : _buildGradeList(),
+                : errorMessage != null && gradeData.isEmpty
+                ? _buildErrorView() 
+                : RefreshIndicator(
+                    onRefresh: () async {
+                      final prefs = await SharedPreferences.getInstance();
+                      await _fetchGrades(prefs.getString('user_id') ?? "");
+                    },
+                    child: _buildGradeList(),
+                  ),
           ),
         ],
       ),
@@ -172,22 +220,32 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
       child: Column(
         children: [
           // ComboBox chọn Ngành
-          _buildCustomDropdown(
-            icon: Icons.school_rounded,
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                isExpanded: true,
-                value: selectedProgramId,
-                items: programList.map<DropdownMenuItem<String>>((p) {
-                  return DropdownMenuItem<String>(
-                    value: p["program_id"].toString(),
-                    child: Text(p["program_name"].toString(), 
-                      style: const TextStyle(fontSize: 13, overflow: TextOverflow.ellipsis)),
-                  );
-                }).toList(),
-                onChanged: (v) => setState(() => selectedProgramId = v!),
-              ),
-            ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(color: vinhUniBlue.withOpacity(0.05), borderRadius: BorderRadius.circular(14)),
+            child: Row(children: [
+              Icon(Icons.school_rounded, size: 20, color: vinhUniBlue),
+              const SizedBox(width: 12),
+              Expanded(
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    isExpanded: true,
+                    value: selectedProgramId,
+                    items: programList.map<DropdownMenuItem<String>>((p) {
+                      return DropdownMenuItem<String>(
+                        value: p["program_id"].toString(),
+                        child: Text(p["program_name"].toString(), 
+                          style: const TextStyle(fontSize: 13, overflow: TextOverflow.ellipsis)),
+                      );
+                    }).toList(),
+                    onChanged: (v) {
+                      setState(() => selectedProgramId = v!);
+                      _triggerFetch();
+                    },
+                  ),
+                ),
+              )
+            ]),
           ),
           const SizedBox(height: 12),
           // Bộ lọc Năm học - Học kỳ
@@ -198,33 +256,36 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
                   selectedNamHoc = v!;
                   _updateKys();
                 });
+                _triggerFetch();
               })),
               const SizedBox(width: 12),
               Expanded(child: _buildInputDropdown("Học kỳ", selectedHocKy, listHocKy, (v) {
                 setState(() => selectedHocKy = v!);
+                _triggerFetch();
               })),
             ],
           ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () async {
-                final prefs = await SharedPreferences.getInstance();
-                final id = prefs.getString('user_id');
-                if (id != null) _fetchGrades(id);
-              },
-              icon: const Icon(Icons.search_rounded, color: Colors.white),
-              label: const Text("TRA CỨU ĐIỂM", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: vinhUniBlue,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ),
-            ),
-          )
         ],
       ),
+    );
+  }
+
+  void _triggerFetch() async {
+    final prefs = await SharedPreferences.getInstance();
+    final id = prefs.getString('user_id');
+    if (id != null) _fetchGrades(id);
+  }
+
+  Widget _buildInputDropdown(String label, String val, List<String> items, Function(String?) onChanged) {
+    return DropdownButtonFormField<String>(
+      value: items.contains(val) ? val : (items.isNotEmpty ? items.first : null),
+      decoration: InputDecoration(
+        labelText: label, labelStyle: const TextStyle(fontSize: 11),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: vinhUniBlue.withOpacity(0.1))),
+      ),
+      items: items.map<DropdownMenuItem<String>>((String i) => DropdownMenuItem<String>(value: i, child: Text(i, style: const TextStyle(fontSize: 12)))).toList(),
+      onChanged: onChanged,
     );
   }
 
@@ -233,12 +294,12 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
 
     return ListView.builder(
       padding: const EdgeInsets.only(left: 16, right: 16, bottom: 100),
-      physics: const BouncingScrollPhysics(),
+      physics: const AlwaysScrollableScrollPhysics(),
       itemCount: gradeData.length,
       itemBuilder: (context, index) {
         final item = gradeData[index];
-        final String rawInfo = item['NoiDung'] ?? "";
-        final String summary = item['NgayThi'] ?? "";
+        final String rawInfo = item['NoiDung']?.toString() ?? "";
+        final String summary = item['NgayThi']?.toString() ?? "";
 
         String parse(String key) {
           final parts = rawInfo.split('|');
@@ -267,7 +328,7 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
                   children: [
                     Icon(Icons.bookmark_outline_rounded, size: 20, color: vinhUniBlue),
                     const SizedBox(width: 10),
-                    Expanded(child: Text(item['TenHocPhan'] ?? "", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
+                    Expanded(child: Text(item['TenHocPhan']?.toString() ?? "Học phần", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(color: vinhUniBlue, borderRadius: BorderRadius.circular(10)),
@@ -296,7 +357,7 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             _summaryText("Hệ 10:", he10, vinhUniBlue),
-                            _summaryText("Hệ 4:", parse("Hệ 4"), Colors.green.shade600),
+                            _summaryText("Hệ 4:", parse("Hệ 4"), Colors.green.shade700),
                           ],
                         ),
                         _buildLetterBadge(letter, statusColor),
@@ -309,29 +370,6 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
           ),
         );
       },
-    );
-  }
-
-  // --- Widget Helpers ---
-
-  Widget _buildCustomDropdown({required Widget child, required IconData icon}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(color: vinhUniBlue.withOpacity(0.05), borderRadius: BorderRadius.circular(14)),
-      child: Row(children: [Icon(icon, size: 20, color: vinhUniBlue), const SizedBox(width: 12), Expanded(child: child)]),
-    );
-  }
-
-  Widget _buildInputDropdown(String label, String val, List<String> items, Function(String?) onChanged) {
-    return DropdownButtonFormField<String>(
-      value: items.contains(val) ? val : (items.isNotEmpty ? items.first : null),
-      decoration: InputDecoration(
-        labelText: label, labelStyle: const TextStyle(fontSize: 11),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: vinhUniBlue.withOpacity(0.1))),
-      ),
-      items: items.map<DropdownMenuItem<String>>((String i) => DropdownMenuItem<String>(value: i, child: Text(i, style: const TextStyle(fontSize: 12)))).toList(),
-      onChanged: onChanged,
     );
   }
 
@@ -357,8 +395,8 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
     child: Text(letter, style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: color)),
   );
 
-  Widget _buildEmptyState() => Center(child: Text("Không có dữ liệu", style: TextStyle(color: Colors.grey.shade400)));
-  Widget _buildErrorView() => Center(child: Text(errorMessage ?? "Lỗi", style: const TextStyle(color: Colors.red)));
+  Widget _buildEmptyState() => const Center(child: Text("Không có dữ liệu", style: TextStyle(color: Colors.grey)));
+  Widget _buildErrorView() => Center(child: Text(errorMessage ?? "Lỗi tải bảng điểm"));
 
   Color _getGradeColor(String grade) {
     if (grade.contains('A')) return Colors.green.shade700;

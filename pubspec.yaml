@@ -1,9 +1,9 @@
 name: vinhuni_app
-description: "Hệ thống quản lý và điểm danh sinh viên thông minh - Đại học Vinh."
+description: "Hệ thống quản và hỗ trợ đào tạo cho cán bộ và người học -Trường Đại học Vinh."
 publish_to: 'none'
 
 # TĂNG LÊN +3 VÌ BẠN ĐÃ CÓ BẢN +2 TRƯỚC ĐÓ
-version: 1.1.0+13
+version: 1.2.0+14
 
 environment:
   sdk: '>=3.10.7 <4.0.0'
@@ -28,6 +28,7 @@ dependencies:
   shared_preferences: ^2.2.2
   local_auth_android: ^1.0.39
   local_auth_ios: ^1.1.7
+  path_provider: ^2.1.2
 
   # 2. 🔥 BỘ ĐÔI FIREBASE ỔN ĐỊNH (Tương đương iOS SDK 11.0)
   # Đã hạ xuống bản 2.27.0 và 14.7.10 để không bị lỗi build
@@ -47,10 +48,15 @@ dependencies:
   qr_flutter: ^4.1.0 # Thư viện vẽ mã QR siêu nhẹ
   flutter_html: ^3.0.0
   flutter_secure_storage: ^9.0.0
+  webview_flutter: ^4.10.0
+  shimmer: ^3.0.0
+  avatar_glow: ^3.0.1
+  dio: ^5.4.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  package_info_plus: ^8.0.0
   
   # BỔ SUNG ĐỂ TỰ ĐỘNG TẠO APP ICON
   flutter_launcher_icons: ^0.13.1
