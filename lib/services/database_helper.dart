@@ -40,6 +40,25 @@ class DatabaseHelper {
         is_deleted_local INTEGER DEFAULT 0 
       )
     ''');
+    await db.execute('''
+      CREATE TABLE tbl_StaffSchedule (
+        ScheduleId INTEGER PRIMARY KEY,
+        EventDate TEXT,        -- YYYY-MM-DD
+        Session TEXT,          -- Sáng, Chiều, Tối
+        TimeValue TEXT,        -- 07:30...
+        Content TEXT,          -- Nội dung công tác
+        Participants TEXT,     -- Thành phần tham dự
+        Location TEXT,         -- Địa điểm
+        Chairperson TEXT,      -- Người chủ trì
+        EventHash TEXT,        -- Để check xem bản ghi có thay đổi ko
+        TargetGroups TEXT,     -- Nhóm đối tượng (CB, SV...)
+        IsNotified INTEGER,    -- 0: Chưa, 1: Rồi
+        IsModified INTEGER,    -- Đánh dấu lịch bị sửa
+        CreatedAt TEXT,
+        UpdatedAt TEXT,
+        IsReminderSent INTEGER -- Đã nhắc lịch chưa
+      )
+    ''');
 
     // 2. Bảng Văn bản PDF (Documents Cache)
     await db.execute('''
@@ -52,6 +71,7 @@ class DatabaseHelper {
         last_updated TEXT
       )
     ''');
+    
 
     // 3. Bảng Lịch thi & Bộ lọc lịch thi
     await db.execute('CREATE TABLE exam_filters (StudentId TEXT PRIMARY KEY, RawJson TEXT)');
@@ -70,7 +90,62 @@ class DatabaseHelper {
   }
 
   // --- [PHẦN 2: CÁC HÀM XỬ LÝ VĂN BẢN PDF] ---
+  Future<void> syncFullWeeklySchedule(List<dynamic> dataList) async {
+  final db = await instance.database;
+  final batch = db.batch();
 
+  for (var item in dataList) {
+    batch.insert(
+      'tbl_StaffSchedule',
+      {
+        'ScheduleId': item['ScheduleId'],
+        'EventDate': item['EventDate'],
+        'Session': item['Session'],
+        'TimeValue': item['TimeValue'],
+        'Content': item['Content'],
+        'Participants': item['Participants'],
+        'Location': item['Location'],
+        'Chairperson': item['Chairperson'],
+        'EventHash': item['EventHash'],
+        'TargetGroups': item['TargetGroups'],
+        'IsNotified': item['IsNotified'] == true ? 1 : 0,
+        'IsModified': item['IsModified'] == true ? 1 : 0,
+        'CreatedAt': item['CreatedAt'],
+        'UpdatedAt': item['UpdatedAt'],
+        'IsReminderSent': item['IsReminderSent'] == true ? 1 : 0,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+  await batch.commit(noResult: true);
+}
+  // Lấy lịch theo ngày được chọn
+Future<List<Map<String, dynamic>>> getSchedulesByDate(String date) async {
+  final db = await instance.database;
+  return await db.query(
+    'tbl_StaffSchedule',
+    where: 'EventDate = ?',
+    whereArgs: [date],
+    orderBy: 'TimeValue ASC',
+  );
+}
+// 1. Lấy toàn bộ lịch từ máy lên
+Future<List<Map<String, dynamic>>> getAllStaffSchedules() async {
+  final db = await instance.database;
+  return await db.query('tbl_StaffSchedule', orderBy: 'EventDate ASC, TimeValue ASC');
+}
+
+// 2. Đồng bộ toàn bộ lịch vào máy (Dùng Batch cho nhanh)
+
+// Tìm kiếm lịch theo nội dung hoặc người chủ trì (Search cực nhanh)
+Future<List<Map<String, dynamic>>> searchSchedule(String query) async {
+  final db = await instance.database;
+  return await db.query(
+    'tbl_StaffSchedule',
+    where: 'Content LIKE ? OR Chairperson LIKE ?',
+    whereArgs: ['%$query%', '%$query%'],
+  );
+}
   Future<void> saveDocumentsCache(List<dynamic> docs) async {
     try {
       final db = await instance.database;

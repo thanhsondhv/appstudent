@@ -61,8 +61,9 @@ class _XepLoaiScreenState extends State<XepLoaiScreen> {
           final String token = data['token'];
 
           // 2. Load Request với URL động dựa trên widget.chucNang
-          final String targetUrl = 'http://canbo.vinhuni.edu.vn/mobile-call-url/${widget.chucNang}';
-
+       final String targetUrl = 'http://canbo.vinhuni.edu.vn/mobile-call-url/${widget.chucNang}';
+        print("🚀 Đang gọi URL: $targetUrl"); // Kiểm tra log xem nó có ra đúng .../xep-loai không
+          
           await _controller.loadRequest(
             Uri.parse(targetUrl),
             headers: {

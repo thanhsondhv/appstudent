@@ -6,7 +6,8 @@ import '../services/notification_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:geolocator/geolocator.dart';
-
+import 'package:package_info_plus/package_info_plus.dart';
+import 'dart:io';
 // Import các màn hình
 import 'search_screen.dart';
 import 'chungchi_tracuu.dart';
@@ -22,7 +23,9 @@ import 'mo_diem_danh_screen.dart';
 import 'diem_danh_sv_screen.dart';
 import 'qr_scanner_screen.dart';
 import 'congcambo_screen.dart';
-import '../services/database_helper.dart'; // 🔥 Dòng quan trọng nhất để sửa lỗi của bạn
+import '../services/database_helper.dart'; 
+import 'package:vinhuni_app/views/chatgroup/chat_room_page.dart';
+
 final GlobalKey<ChatScreenState> chatScreenKey = GlobalKey<ChatScreenState>();
 
 class HomeScreen extends StatefulWidget {
@@ -53,10 +56,17 @@ class _HomeScreenState extends State<HomeScreen> {
   List<dynamic> appMenu = [];
 
   @override
-  void initState() {
-    super.initState();
-    _initAppData();
-  }
+void initState() {
+  super.initState();
+  
+  // 1. Khởi tạo các dữ liệu ngầm (User, Token...)
+  _initAppData();
+
+  // 2. Kiểm tra phiên bản (Đợi App dựng xong 1 khung hình rồi mới hiện BottomSheet)
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _checkVersion(); 
+  });
+}
 
   Future<void> _initAppData() async {
   // 1. Load User Info lên trước để lấy Role
@@ -72,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> {
     NotificationService.syncTokenToServer(studentId); 
   }
 }
-
+ 
   Future<void> _loadUserInfo() async {
     final prefs = await SharedPreferences.getInstance();
     if (mounted) {
@@ -88,7 +98,125 @@ class _HomeScreenState extends State<HomeScreen> {
       _fetchUnreadCount(); 
     }
   }
+ // Thêm hàm so sánh thông minh này vào class _HomeScreenState
+bool _isNewerVersion(String current, String latest) {
+  try {
+    // Tách "1.2.0+14" thành ["1.2.0", "14"]
+    List<String> curParts = current.split('+');
+    List<String> latParts = latest.split('+');
 
+    // 1. So sánh phần Version trước (1.2.0)
+    if (curParts[0] != latParts[0]) {
+      return true; // Khác version chính là cần update
+    }
+
+    // 2. Nếu version giống nhau, so sánh Build Number (14 vs 15)
+    int curBuild = int.parse(curParts.length > 1 ? curParts[1] : "0");
+    int latBuild = int.parse(latParts.length > 1 ? latParts[1] : "0");
+
+    return latBuild > curBuild; // Chỉ hiện update nếu bản server lớn hơn bản máy
+  } catch (e) {
+    return false;
+  }
+}
+
+Future<void> _checkVersion() async {
+  debugPrint("🚀 Đang bắt đầu check version...");
+  try {
+    PackageInfo packageInfo = await PackageInfo.fromPlatform();
+    String currentVer = "${packageInfo.version}+${packageInfo.buildNumber}";
+
+    //debugPrint("📱 Version hiện tại trên máy: $currentVer");
+
+    final response = await http.get(Uri.parse('https://mobi.vinhuni.edu.vn/api/check-version'));
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      Map<String, dynamic> platformData = Platform.isAndroid ? data['android'] : data['ios'];
+
+      String latestVer = platformData['latest_version'];
+      debugPrint("☁️ Version mới nhất trên Server: $latestVer");
+
+      bool needUpdate = _isNewerVersion(currentVer, latestVer);
+      debugPrint("🔍 Kết quả so sánh: ${needUpdate ? 'CẦN UPDATE' : 'KHÔNG CẦN'}");
+
+      if (needUpdate) {
+        _showUpdateDialog(currentVer, latestVer, platformData['url'], platformData['is_force']);
+      }
+    }
+  } catch (e) {
+    debugPrint("🔥 Lỗi Debug: $e");
+  }
+}
+// Thêm tham số String url vào hàm
+void _showUpdateDialog(String current, String latest, String url, bool force) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    isDismissible: !force,
+    enableDrag: !force,
+    backgroundColor: Colors.transparent,
+    builder: (context) => Container(
+      padding: const EdgeInsets.fromLTRB(25, 20, 25, 30),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10))),
+          const SizedBox(height: 25),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(color: Colors.blue.shade50, shape: BoxShape.circle),
+            child: Icon(Icons.rocket_launch_rounded, size: 50, color: vinhUniBlue),
+          ),
+          const SizedBox(height: 20),
+          const Text("Đã có phiên bản mới!!", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          Text(
+            "VinhUni App đã có bản $latest. Vui lòng cập nhật để trải nghiệm tính năng mới nhất.",
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey[600], fontSize: 14),
+          ),
+          const SizedBox(height: 30),
+          SizedBox(
+            width: double.infinity,
+            height: 55,
+            child: ElevatedButton(
+              onPressed: () async {
+                final uri = Uri.parse(url); // Dùng URL truyền từ API xuống
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: vinhUniBlue,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              ),
+              child: const Text("CẬP NHẬT NGAY", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+          ),
+          if (!force)
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text("Để sau", style: TextStyle(color: Colors.grey[500])),
+            ),
+        ],
+      ),
+    ),
+  );
+}
+
+Widget _buildVersionInfo(String label, String ver, Color color) {
+  return Column(
+    children: [
+      Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+      const SizedBox(height: 4),
+      Text(ver, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
+    ],
+  );
+}
   // --- 4. LOGIC ĐIỂM DANH (QR + FACEID + GPS) ---
   void _handleQRScan() async {
     final String? qrResult = await Navigator.push(
@@ -439,11 +567,12 @@ class _HomeContentState extends State<HomeContent> {
       case 'leaderboard': return Icons.leaderboard_rounded; // Cho Xếp loại
       case 'account_box': return Icons.account_box_rounded; // Cho Hồ sơ
       case 'contact_phone': return Icons.contact_phone_rounded; // Cho Danh bạ
+      case 'chat_groups': return Icons.chat_rounded; // Cho Nhóm chat
       default: return Icons.widgets_rounded; 
     }
   }
 
-  @override
+
   @override
   Widget build(BuildContext context) {
     // Chuẩn hóa role về chữ thường để so sánh không bị sai
@@ -628,7 +757,7 @@ class _HomeContentState extends State<HomeContent> {
                     case '/xep_loai':
                       Navigator.push(context, MaterialPageRoute(builder: (context) => XepLoaiScreen(
                         hsid: widget.studentId, 
-                        chucNang: 'xep-loai', // Slug URL phía Odoo
+                        chucNang: 'XepLoai_ThangTheoCaNhan', // Slug URL phía Odoo
                         title: 'Xếp loại cán bộ'
                       ))); break;
                     case '/ho_so':
@@ -638,6 +767,33 @@ class _HomeContentState extends State<HomeContent> {
                         title: 'Hồ sơ cán bộ'
                       ))); break;
                     case '/ket_qua_chung_nhan': Navigator.push(context, MaterialPageRoute(builder: (context) => ChungChiTraCuuScreen(userMaSV: widget.studentId))); break;
+                    //---
+                    case '/chat_group_list': 
+                      final String role = widget.userRole.toLowerCase();
+                      bool isStaffLocal = role == 'canbo' || role == 'admin' || role == 'covan' || role == 'ad' || role == 'cb';
+
+                      if (isStaffLocal) {
+                        Navigator.push(
+                          context, 
+                          MaterialPageRoute(
+                            builder: (context) => ChatRoomPage(
+                              groupId: 'GROUP_CAN_BO_TOAN_TRUONG', 
+                              userCode: widget.studentId,
+                              // ĐÃ XÓA userRole và isLocked ở đây vì Page sẽ tự lấy từ API
+                            ),
+                          ),
+                        );
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Chức năng điều hành hiện chỉ dành cho cán bộ."),
+                            backgroundColor: Colors.orange,
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                      break;
+                    //---
                     default: try { Navigator.pushNamed(context, route); } catch (e) {} break;
                   }
                 },

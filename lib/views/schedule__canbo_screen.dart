@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'dart:convert';
 import 'api_service_lichcanbo.dart';
 import 'schedule_canbo.dart';
+import '../services/database_helper.dart'; // Đảm bảo đúng đường dẫn file helper
 
 class StaffScheduleScreen extends StatefulWidget {
   const StaffScheduleScreen({super.key});
@@ -17,7 +19,7 @@ class _StaffScheduleScreenState extends State<StaffScheduleScreen> {
   List<WeeklySchedule> _filteredSchedules = [];
   bool _isLoading = true;
   DateTime? _selectedDate;
-  int _weekOffset = 0; // 🔥 0: Tuần này, 1: Tuần sau, -1: Tuần trước
+  int _weekOffset = 0; 
   final Color vinhUniBlue = const Color(0xFF0054A6);
 
   @override
@@ -26,44 +28,51 @@ class _StaffScheduleScreenState extends State<StaffScheduleScreen> {
     _loadData();
   }
 
-  // --- LOGIC XỬ LÝ DỮ LIỆU ---
+  // --- 1. LOGIC TẢI DỮ LIỆU OFFLINE-FIRST ---
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
+    
     try {
-      final data = await api.fetchSchedules();
-      setState(() {
-        _allSchedules = data;
-        _applyFilter();
-        _isLoading = false;
-      });
+      // BƯỚC A: Đọc dữ liệu từ SQLite (Ưu tiên tốc độ, hiện ngay lập tức)
+      final cachedData = await DatabaseHelper.instance.getAllStaffSchedules();
+      if (cachedData.isNotEmpty) {
+        setState(() {
+          _allSchedules = cachedData.map((i) => WeeklySchedule.fromMap(i)).toList();
+          _applyFilter();
+          _isLoading = false; // Tắt loading sớm để cán bộ xem ngay
+        });
+      }
+
+      // BƯỚC B: Tải dữ liệu mới từ API (Âm thầm cập nhật bản mới nhất)
+      final List<WeeklySchedule> freshData = await api.fetchSchedules();
+      
+      // BƯỚC C: Lưu bản mới 15 cột vào SQLite để dùng cho lần sau
+      await DatabaseHelper.instance.syncFullWeeklySchedule(
+        freshData.map((e) => e.toMap()).toList()
+      );
+
+      if (mounted) {
+        setState(() {
+          _allSchedules = freshData;
+          _applyFilter();
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Lỗi: $e")));
+      if (_allSchedules.isEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Không thể tải lịch: $e"), behavior: SnackBarBehavior.floating)
+        );
       }
     }
   }
 
-  String _getVietDay(String dateStr) {
-    try {
-      DateTime date = DateTime.parse(dateStr);
-      switch (date.weekday) {
-        case 1: return "Thứ 2";
-        case 2: return "Thứ 3";
-        case 3: return "Thứ 4";
-        case 4: return "Thứ 5";
-        case 5: return "Thứ 6";
-        case 6: return "Thứ 7";
-        case 7: return "CN";
-        default: return "";
-      }
-    } catch (e) { return ""; }
-  }
+  // --- 2. LOGIC BỘ LỌC & TIỆN ÍCH ---
 
   void _applyFilter() {
     if (_selectedDate == null) {
-      // Tính toán ngày dựa trên Offset tuần
       DateTime now = DateTime.now().add(Duration(days: _weekOffset * 7));
       DateTime startOfWeek = DateTime(now.year, now.month, now.day).subtract(Duration(days: now.weekday - 1));
       DateTime endOfWeek = startOfWeek.add(const Duration(days: 6, hours: 23, minutes: 59));
@@ -83,8 +92,65 @@ class _StaffScheduleScreenState extends State<StaffScheduleScreen> {
     }
   }
 
-  // --- GIAO DIỆN THANH ĐIỀU HƯỚNG TUẦN ---
+  String _getVietDay(String dateStr) {
+    try {
+      DateTime date = DateTime.parse(dateStr);
+      switch (date.weekday) {
+        case 1: return "Thứ 2";
+        case 2: return "Thứ 3";
+        case 3: return "Thứ 4";
+        case 4: return "Thứ 5";
+        case 5: return "Thứ 6";
+        case 6: return "Thứ 7";
+        case 7: return "CN";
+        default: return "";
+      }
+    } catch (e) { return ""; }
+  }
 
+  // --- 3. GIAO DIỆN (UI) ---
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FA),
+      appBar: AppBar(
+        toolbarHeight: 70,
+        backgroundColor: vinhUniBlue,
+        elevation: 0,
+        centerTitle: true,
+        title: const Text("Lịch Công Tác", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+        iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          IconButton(
+            icon: Icon(_selectedDate == null ? Icons.calendar_month : Icons.filter_alt), 
+            onPressed: _pickDate
+          ),
+        ],
+      ),
+      body: _isLoading && _allSchedules.isEmpty
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                _buildFilterBanner(),
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _loadData,
+                    child: _filteredSchedules.isEmpty
+                        ? _buildEmptyState()
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            itemCount: _filteredSchedules.length,
+                            itemBuilder: (context, index) => _buildScheduleCard(_filteredSchedules[index]),
+                          ),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+
+  // Banner điều hướng tuần
   Widget _buildFilterBanner() {
     String label = "";
     DateTime now = DateTime.now().add(Duration(days: _weekOffset * 7));
@@ -102,55 +168,99 @@ class _StaffScheduleScreenState extends State<StaffScheduleScreen> {
 
     return Container(
       width: double.infinity,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Colors.grey.shade200, width: 0.5))
-      ),
+      decoration: BoxDecoration(color: Colors.white, border: Border(bottom: BorderSide(color: Colors.grey.shade200, width: 0.5))),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Nút lùi tuần
-          if (_selectedDate == null)
-            IconButton(
-              icon: Icon(Icons.chevron_left, color: vinhUniBlue),
-              onPressed: () => setState(() { _weekOffset--; _applyFilter(); }),
-            )
-          else const SizedBox(width: 48),
-
-          // Hiển thị dải ngày
+          _selectedDate == null 
+            ? IconButton(icon: Icon(Icons.chevron_left, color: vinhUniBlue), onPressed: () => setState(() { _weekOffset--; _applyFilter(); }))
+            : const SizedBox(width: 48),
           Column(
             children: [
               Text(label, style: TextStyle(fontSize: 14, color: vinhUniBlue, fontWeight: FontWeight.bold)),
-              Text("${DateFormat('dd/MM').format(start)} - ${DateFormat('dd/MM').format(end)}", 
-                   style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+              Text("${DateFormat('dd/MM').format(start)} - ${DateFormat('dd/MM').format(end)}", style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
             ],
           ),
-
-          // Nút tiến tuần
-          if (_selectedDate == null)
-            IconButton(
-              icon: Icon(Icons.chevron_right, color: vinhUniBlue),
-              onPressed: () => setState(() { _weekOffset++; _applyFilter(); }),
-            )
-          else 
-            IconButton(
-              icon: const Icon(Icons.close, color: Colors.red, size: 20),
-              onPressed: () => setState(() { _selectedDate = null; _weekOffset = 0; _applyFilter(); }),
-            ),
+          _selectedDate == null
+            ? IconButton(icon: Icon(Icons.chevron_right, color: vinhUniBlue), onPressed: () => setState(() { _weekOffset++; _applyFilter(); }))
+            : IconButton(icon: const Icon(Icons.close, color: Colors.red, size: 20), onPressed: () => setState(() { _selectedDate = null; _weekOffset = 0; _applyFilter(); })),
         ],
       ),
     );
   }
 
-  // --- CÁC HÀM UI KHÁC (GIỮ NGUYÊN BẢN ĐẸP CŨ) ---
+  // Card lịch chi tiết (Zalo Style)
+  Widget _buildScheduleCard(WeeklySchedule item) {
+    bool isMorning = item.session.contains("Sáng");
+    String shortDate = "";
+    try { shortDate = DateFormat('dd/MM').format(DateTime.parse(item.date)); } catch (e) { }
+    
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white, borderRadius: BorderRadius.circular(12),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 2))],
+      ),
+      child: InkWell(
+        onTap: () => _showScheduleDetail(item),
+        borderRadius: BorderRadius.circular(12),
+        child: IntrinsicHeight(
+          child: Row(
+            children: [
+              Container(width: 4, color: isMorning ? Colors.orange[300] : Colors.blue[300]),
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                width: 90, 
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(_getVietDay(item.date), style: TextStyle(fontSize: 10, color: vinhUniBlue, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 2),
+                    Text(shortDate, style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+                    const SizedBox(height: 4),
+                    Text(item.time, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: vinhUniBlue)),
+                  ],
+                ),
+              ),
+              VerticalDivider(width: 1, thickness: 0.5, color: Colors.grey[100], indent: 15, endIndent: 15),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(item.content, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, height: 1.3)),
+                      if (item.chair.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text("Chủ trì: ${item.chair}", style: TextStyle(color: Colors.grey[600], fontSize: 12), overflow: TextOverflow.ellipsis),
+                      ],
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(Icons.location_on_outlined, size: 12, color: Colors.grey[400]),
+                          const SizedBox(width: 4),
+                          Expanded(child: Text(item.location, style: TextStyle(color: Colors.grey[500], fontSize: 12), overflow: TextOverflow.ellipsis)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Icon(Icons.keyboard_arrow_right_rounded, color: Colors.grey[200], size: 22),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- 4. CÁC HÀM PHỤ TRỢ UI ---
 
   void _showScheduleDetail(WeeklySchedule item) {
     bool isMorning = item.session.contains("Sáng");
     showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
+      context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
       builder: (context) => Container(
         height: MediaQuery.of(context).size.height * 0.75,
         decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(25))),
@@ -217,142 +327,17 @@ class _StaffScheduleScreenState extends State<StaffScheduleScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
-      appBar: AppBar(
-        toolbarHeight: 70,
-        backgroundColor: vinhUniBlue,
-        elevation: 0,
-        centerTitle: true,
-        title: const Text("Lịch Công Tác", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-        iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(icon: Icon(_selectedDate == null ? Icons.calendar_month : Icons.filter_alt), onPressed: _pickDate),
-          PopupMenuButton<String>(
-            onSelected: _handleSync,
-            icon: const Icon(Icons.sync),
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: "current", child: Text("Đồng bộ tuần này")),
-              const PopupMenuItem(value: "next", child: Text("Đồng bộ tuần sau")),
-            ],
-          ),
-        ],
-      ),
-      body: _isLoading 
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                _buildFilterBanner(),
-                Expanded(
-                  child: RefreshIndicator(
-                    onRefresh: _loadData,
-                    child: _filteredSchedules.isEmpty
-                        ? _buildEmptyState()
-                        : ListView.builder(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
-                            itemCount: _filteredSchedules.length,
-                            itemBuilder: (context, index) => _buildScheduleCard(_filteredSchedules[index]),
-                          ),
-                  ),
-                ),
-              ],
-            ),
-    );
-  }
-
-  Widget _buildScheduleCard(WeeklySchedule item) {
-    bool isMorning = item.session.contains("Sáng");
-    String shortDate = "";
-    String thu = _getVietDay(item.date);
-    try {
-      shortDate = DateFormat('dd/MM').format(DateTime.parse(item.date));
-    } catch (e) { shortDate = ""; }
-    
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 2))],
-      ),
-      child: InkWell(
-        onTap: () => _showScheduleDetail(item),
-        borderRadius: BorderRadius.circular(12),
-        child: IntrinsicHeight(
-          child: Row(
-            children: [
-              Container(width: 4, color: isMorning ? Colors.orange[300] : Colors.blue[300]),
-              Container(
-                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                width: 90, 
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(thu, style: TextStyle(fontSize: 10, color: vinhUniBlue, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 2),
-                    Text(shortDate, style: TextStyle(fontSize: 11, color: Colors.grey[400])),
-                    const SizedBox(height: 4),
-                    Text(item.time, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: vinhUniBlue, letterSpacing: -0.5)),
-                  ],
-                ),
-              ),
-              VerticalDivider(width: 1, thickness: 0.5, color: Colors.grey[100], indent: 15, endIndent: 15),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(item.content, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14, height: 1.3)),
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          Icon(Icons.location_on_outlined, size: 12, color: Colors.grey[400]),
-                          const SizedBox(width: 4),
-                          Expanded(child: Text(item.location, style: TextStyle(color: Colors.grey[500], fontSize: 12), overflow: TextOverflow.ellipsis)),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              Icon(Icons.keyboard_arrow_right_rounded, color: Colors.grey[200], size: 22),
-              const SizedBox(width: 4),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildEmptyState() {
-    return ListView(
-      children: [
-        SizedBox(height: MediaQuery.of(context).size.height * 0.2),
-        Icon(Icons.event_busy_outlined, size: 70, color: Colors.grey.shade300),
-        const SizedBox(height: 16),
-        const Center(child: Text("Không có lịch trình.", style: TextStyle(color: Colors.grey))),
-      ],
-    );
+    return ListView(children: [
+      SizedBox(height: MediaQuery.of(context).size.height * 0.2),
+      Icon(Icons.event_busy_outlined, size: 70, color: Colors.grey.shade300),
+      const SizedBox(height: 16),
+      const Center(child: Text("Không có lịch trình.", style: TextStyle(color: Colors.grey))),
+    ]);
   }
 
   Future<void> _pickDate() async {
     DateTime? picked = await showDatePicker(context: context, initialDate: _selectedDate ?? DateTime.now(), firstDate: DateTime(2025), lastDate: DateTime(2030));
     if (picked != null) { setState(() { _selectedDate = picked; _weekOffset = 0; _applyFilter(); }); }
-  }
-
-  void _handleSync(String week) async {
-    showDialog(context: context, barrierDismissible: false, builder: (_) => const Center(child: CircularProgressIndicator()));
-    try {
-      String msg = await api.syncSchedule(week);
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-      _loadData();
-    } catch (e) {
-      Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Lỗi đồng bộ")));
-    }
   }
 }
