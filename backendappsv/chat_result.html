@@ -1,0 +1,100 @@
+
+    <!DOCTYPE html>
+    <html lang="vi">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <title>VinhUni Secure Chat</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-gray-100">
+        <div id="app" class="flex flex-col h-screen">
+            <div class="bg-white p-2 text-[10px] font-mono border-b flex justify-between shadow-sm">
+                <div>👤 <b>CB1679</b> | 🛡️ <span id="fb-status" class="text-gray-400 font-bold">Firebase...</span></div>
+                <div class="text-green-500">☁️ <b>Đã xác thực Office 365</b></div>
+            </div>
+
+            <div id="chat-messages" class="flex-1 p-4 space-y-3 overflow-y-auto bg-gray-50">
+                <div class="text-center text-blue-500 py-10 animate-pulse">Khởi tạo bảo mật...</div>
+            </div>
+
+            <div class="bg-white p-3 border-t flex items-center space-x-2 fixed bottom-0 w-full shadow-lg">
+                <input type="text" id="msg-input" class="flex-1 bg-gray-100 border-none rounded-full px-4 py-2 outline-none text-sm" placeholder="Nhập nội dung...">
+                <button onclick="sendMessage()" class="bg-blue-600 text-white rounded-full p-2 w-10 h-10 flex items-center justify-center hover:bg-blue-700">
+                    <svg viewBox="0 0 24 24" class="w-5 h-5 fill-current"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <script type="module">
+            import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+            import { getFirestore, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+            import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+            const firebaseConfig = {
+                apiKey: "AIzaSyDFsKsB4CkCB9r1Vb3XXGJPL8sFfB2Z4Wc",
+                authDomain: "vinhuni-portal-student.firebaseapp.com",
+                projectId: "vinhuni-portal-student",
+                storageBucket: "vinhuni-portal-student.firebasestorage.app",
+                messagingSenderId: "306901265797",
+                appId: "1:306901265797:web:5f31d30ce77cff7d2268ec"
+            };
+
+            const app = initializeApp(firebaseConfig);
+            const db = getFirestore(app);
+            const auth = getAuth(app);
+
+            const chatToken = "eyJhbGciOiAiUlMyNTYiLCAidHlwIjogIkpXVCIsICJraWQiOiAiMjY4ODMyNmE2N2ZiYTgyN2IyYWNjODI1ZGU2N2NhYjhmM2M4ZGRmMiJ9.eyJpc3MiOiAiZmlyZWJhc2UtYWRtaW5zZGstZmJzdmNAdmluaHVuaS1wb3J0YWwtc3R1ZGVudC5pYW0uZ3NlcnZpY2VhY2NvdW50LmNvbSIsICJzdWIiOiAiZmlyZWJhc2UtYWRtaW5zZGstZmJzdmNAdmluaHVuaS1wb3J0YWwtc3R1ZGVudC5pYW0uZ3NlcnZpY2VhY2NvdW50LmNvbSIsICJhdWQiOiAiaHR0cHM6Ly9pZGVudGl0eXRvb2xraXQuZ29vZ2xlYXBpcy5jb20vZ29vZ2xlLmlkZW50aXR5LmlkZW50aXR5dG9vbGtpdC52MS5JZGVudGl0eVRvb2xraXQiLCAidWlkIjogIkNCMTY3OSIsICJpYXQiOiAxNzc2NTcxNTI2LCAiZXhwIjogMTc3NjU3NTEyNn0.aN4Z9tvVOTvPJmGNdVXi6fwW39eJPAfFLpotbyid6YfrdLnf34ueGqibTSQaiFSW3vzLg92JoJa1gbWfMvVndFSGVNOQ3NehuYj22nDJl7Q2lOOJTwbsj_k25al_T1NdMWq4oq1RUnR828k2x5ZC_9MOgHwFGT9ZUXnO4jAy0aLA2NODARVpV9e2EeP49tDCYGAd-Y6CZ2_ufgck3j844k7wn6_k7-uhv-njhP-P4aMZ4utRZc73tozPbQKoKX2k9sr8UhNxYIofie1DgyGwrPRtMA7LkMTaJbnDLU8mOCi5D5mzcweS42pdu4Wd4PlmL7wmOVEJHmtzb8DK7FYNIA";
+            const userId = "CB1679";
+            const groupId = "group_test_01";
+            const userCode = "Sơn IT";
+
+            if (chatToken) {
+                signInWithCustomToken(auth, chatToken).then(() => {
+                    document.getElementById('fb-status').innerText = "Firebase OK";
+                    document.getElementById('fb-status').classList.replace("text-gray-400", "text-blue-600");
+                    listenMessages();
+                }).catch(err => {
+                    document.getElementById('chat-messages').innerHTML = '<div class="text-red-500 text-center">Lỗi: Token Chat không hợp lệ.</div>';
+                });
+            }
+
+            function listenMessages() {
+                const q = query(collection(db, "groups", groupId, "messages"), orderBy("createdAt", "asc"));
+                onSnapshot(q, (snapshot) => {
+                    const container = document.getElementById('chat-messages');
+                    container.innerHTML = '';
+                    snapshot.forEach((doc) => {
+                        const data = doc.data();
+                        const isMe = data.senderId === userId;
+                        const msgHtml = `
+                            <div class="flex ${isMe ? 'justify-end' : 'justify-start'}">
+                                <div class="${isMe ? 'bg-blue-600 text-white' : 'bg-white text-gray-800'} max-w-[85%] rounded-2xl px-4 py-2 shadow-sm border">
+                                    <p class="text-[10px] ${isMe ? 'text-blue-100' : 'text-gray-400'} font-bold">${data.senderName || data.senderId}</p>
+                                    <p class="text-sm">${data.text}</p>
+                                </div>
+                            </div>`;
+                        container.insertAdjacentHTML('beforeend', msgHtml);
+                    });
+                    container.scrollTop = container.scrollHeight;
+                });
+            }
+
+            window.sendMessage = async () => {
+                const input = document.getElementById('msg-input');
+                const text = input.value.trim();
+                if (!text) return;
+                try {
+                    await addDoc(collection(db, "groups", groupId, "messages"), {
+                        text: text,
+                        senderId: userId,
+                        senderName: userCode,
+                        createdAt: serverTimestamp()
+                    });
+                    input.value = '';
+                } catch (e) { console.error(e); }
+            };
+        </script>
+    </body>
+    </html>
+    

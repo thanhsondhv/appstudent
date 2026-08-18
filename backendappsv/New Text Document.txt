@@ -1,0 +1,197 @@
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse
+import pyodbc
+import base64
+import hashlib
+import hmac
+
+app = FastAPI(title="Vinh Uni Desktop System")
+
+# --- THÔNG SỐ KẾT NỐI DATABASE (MÁY AI2025) ---
+DB_SERVER = 'AI2025\\SQLEXPRESS02'
+DB_USER = 'sa'
+DB_PASSWORD = '<MAT_KHAU_XEM_TRONG_.env>'
+DRIVER = '{ODBC Driver 17 for SQL Server}'
+CONN_STR = f"DRIVER={DRIVER};SERVER={DB_SERVER};UID={DB_USER};PWD={DB_PASSWORD};"
+
+# --- LOGIC XÁC THỰC MẬT KHẨU ASP.NET V3 ---
+def verify_aspnet_v3(hashed_pass: str, raw_pass: str) -> bool:
+    try:
+        decoded = base64.b64decode(hashed_pass)
+        # Chuẩn V3: Byte 0 là version(0x01), byte 13-28 là salt, byte 29-60 là hash
+        salt = decoded[13:29]
+        stored_key = decoded[29:61]
+        generated_key = hashlib.pbkdf2_hmac('sha256', raw_pass.encode(), salt, 10000, 32)
+        return hmac.compare_digest(generated_key, stored_key)
+    except:
+        return False
+
+# --- HÀM HỖ TRỢ HIỂN THỊ ---
+def get_thu_tieng_viet(ngay_so):
+    mapping = {0: "Chủ Nhật", 1: "Thứ 2", 2: "Thứ 3", 3: "Thứ 4", 4: "Thứ 5", 5: "Thứ 6", 6: "Thứ 7"}
+    return mapping.get(ngay_so, "N/A")
+
+# --- 1. GIAO DIỆN TRANG ĐĂNG NHẬP ---
+@app.get("/", response_class=HTMLResponse)
+async def login_page():
+    return """
+    <html>
+    <head>
+        <title>Vinh Uni - Desktop Login</title>
+        <style>
+            body { font-family: 'Segoe UI', Arial; background: #f4f7f9; display: flex; justify-content: center; padding-top: 100px; }
+            .card { background: white; padding: 40px; border-radius: 15px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); width: 380px; text-align: center; }
+            img { width: 100px; margin-bottom: 20px; }
+            h2 { color: #0056b3; margin-bottom: 30px; }
+            input { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; }
+            button { width: 100%; padding: 14px; background: #0056b3; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; transition: 0.3s; }
+            button:hover { background: #004494; transform: translateY(-2px); }
+            #status { margin-top: 20px; font-size: 14px; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <img src="https://vinhuni.edu.vn/Image/logo.png" alt="Vinh Uni Logo">
+            <h2>Hệ Thống Sinh Viên</h2>
+            <input type="text" id="user" placeholder="Mã sinh viên (UserName)">
+            <input type="password" id="pass" placeholder="Mật khẩu">
+            <button onclick="handleLogin()">ĐĂNG NHẬP HỆ THỐNG</button>
+            <div id="status"></div>
+        </div>
+        <script>
+            async function handleLogin() {
+                const u = document.getElementById('user').value;
+                const p = document.getElementById('pass').value;
+                const s = document.getElementById('status');
+                if(!u || !p) { s.innerHTML = "Vui lòng nhập đủ thông tin"; return; }
+                
+                s.style.color = "blue";
+                s.innerHTML = "Đang xác thực...";
+                
+                try {
+                    const res = await fetch(`/login?username=${u}&password=${p}`, { method: 'POST' });
+                    const data = await res.json();
+                    
+                    if (res.ok) {
+                        s.style.color = "green";
+                        s.innerHTML = "<b>Thành công!</b> Chào bạn " + data.user;
+                        setTimeout(() => { window.location.href = "/get-lich-hoc/" + u; }, 1200);
+                    } else {
+                        s.style.color = "red";
+                        s.innerHTML = data.detail || "Đăng nhập thất bại";
+                    }
+                } catch (e) {
+                    s.innerHTML = "Lỗi kết nối Server API";
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
+
+# --- 2. XỬ LÝ LOGIC ĐĂNG NHẬP ---
+@app.post("/login")
+def login(username: str, password: str):
+    try:
+        with pyodbc.connect(CONN_STR) as conn:
+            cursor = conn.cursor()
+            # Truy vấn PasswordHash từ DB Core qua Linked Server
+            sql = f"SELECT * FROM OPENQUERY([172.16.95.200], 'SELECT PasswordHash, FullNameNew FROM DHVINH_Stagging_Core.Identityserver.Users WHERE UserName = ''{username}''')"
+            cursor.execute(sql)
+            row = cursor.fetchone()
+            
+            if not row:
+                raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản")
+            if not row.PasswordHash:
+                raise HTTPException(status_code=401, detail="Tài khoản chưa có mật khẩu (NULL)")
+                
+            if verify_aspnet_v3(row.PasswordHash, password):
+                return {"status": "success", "user": row.FullNameNew}
+            
+            raise HTTPException(status_code=401, detail="Mật khẩu không chính xác")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- 3. GIAO DIỆN BẢNG LỊCH HỌC ---
+@app.get("/get-lich-hoc/{student_id}", response_class=HTMLResponse)
+async def get_lich(student_id: str):
+    try:
+        with pyodbc.connect(CONN_STR) as conn:
+            cursor = conn.cursor()
+            # Lấy lịch học chi tiết
+            sql = f"""
+                SELECT * FROM OPENQUERY([172.16.95.200], 
+                'SELECT sv.HoTen, sv.MaLopHP, lhp.Ten AS TenLop, tkb.MaPhong, tkb.NgayHoc, tkb.TietHoc, tkb.TuanHocFulls
+                 FROM DHVINH_Stagging_DBDaoTao_ChinhQuy.dbo.viewDSSinhVienDangKyHoc sv
+                 INNER JOIN DHVINH_Stagging_DBDaoTao_ChinhQuy.dbo.tbl_Tkb_LopHocPhan lhp ON sv.MaLopHP = lhp.Code 
+                 INNER JOIN DHVINH_Stagging_DBDaoTao_ChinhQuy.dbo.tbl_Tkb_LopHocPhan_LichHoc tkb ON lhp.Id = tkb.IdLopHocPhan
+                 WHERE sv.IdNguoiHoc = ''{student_id}''')
+            """
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+
+        if not rows:
+            return "<h3>Không tìm thấy dữ liệu lịch học cho sinh viên này.</h3>"
+
+        # Tạo các dòng cho bảng
+        table_content = ""
+        for r in rows:
+            table_content += f"""
+            <tr>
+                <td>{r.TenLop}</td>
+                <td class="text-center"><b>{get_thu_tieng_viet(r.NgayHoc)}</b></td>
+                <td class="text-center">Tiết {r.TietHoc}</td>
+                <td class="text-center"><span class="room-box">{r.MaPhong}</span></td>
+                <td class="week-text">{r.TuanHocFulls}</td>
+            </tr>
+            """
+
+        return f"""
+        <html>
+        <head>
+            <title>Lịch học - {rows[0].HoTen}</title>
+            <style>
+                body {{ font-family: 'Segoe UI', Tahoma; background: #eef2f7; padding: 30px; }}
+                .container {{ background: white; padding: 30px; border-radius: 12px; box-shadow: 0 5px 20px rgba(0,0,0,0.05); max-width: 1000px; margin: auto; }}
+                h2 {{ color: #0056b3; border-bottom: 2px solid #0056b3; padding-bottom: 10px; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 25px; }}
+                th, td {{ border: 1px solid #dee2e6; padding: 15px; text-align: left; }}
+                th {{ background-color: #0056b3; color: white; text-transform: uppercase; font-size: 13px; }}
+                tr:hover {{ background-color: #f8f9fa; }}
+                .text-center {{ text-align: center; }}
+                .room-box {{ background: #ff4757; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold; }}
+                .week-text {{ color: #666; font-size: 11px; }}
+                .btn-back {{ display: inline-block; margin-top: 20px; padding: 10px 20px; background: #6c757d; color: white; text-decoration: none; border-radius: 5px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h2>📅 Thời Khóa Biểu: {rows[0].HoTen}</h2>
+                <p>Mã định danh: <b>{student_id}</b></p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Tên Học Phần</th>
+                            <th class="text-center">Thứ</th>
+                            <th class="text-center">Tiết</th>
+                            <th class="text-center">Phòng</th>
+                            <th>Tuần Học</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {table_content}
+                    </tbody>
+                </table>
+                <a href="/" class="btn-back">⬅ Quay lại Đăng nhập</a>
+            </div>
+        </body>
+        </html>
+        """
+    except Exception as e:
+        return f"<h3>Lỗi hệ thống: {str(e)}</h3>"
+
+# --- KHỞI CHẠY SERVER ---
+if __name__ == "__main__":
+    import uvicorn
+    # Chạy trên cổng 8080 để tránh trùng với App Điểm danh (8000)
+    uvicorn.run(app, host="0.0.0.0", port=8080)

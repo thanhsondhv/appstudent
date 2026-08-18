@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'notification_settings_screen.dart';
+import '../core/api/api.dart';
+import 'package:dio/dio.dart' show FormData, MultipartFile;
 
 class ProfileScreen extends StatefulWidget {
   final VoidCallback? onAvatarUpdate;
@@ -55,12 +54,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // 🔥 HÀM GỌI API LẤY LỚP & TRẠNG THÁI (Đã bỏ lỗi kết nối hiển thị ra ngoài)
   Future<void> _fetchStudentExtraInfo(String id) async {
     try {
-      final response = await http.get(
-        Uri.parse("https://mobi.vinhuni.edu.vn/api/student-info/$id"),
-      ).timeout(const Duration(seconds: 5));
+      final response = await Api.get(
+        "/api/student-info/$id",
+        hanCho: const Duration(seconds: 60),
+      );
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+      if (response.thanhCong) {
+        final data = response.data is Map ? response.data as Map : const {};
         if (data['status'] == 'success') {
           setState(() {
             studentStatus = data['trang_thai'];
@@ -103,22 +103,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() => _isUpdatingFace = true);
 
     try {
-      var request = http.MultipartRequest('POST', Uri.parse("https://mobi.vinhuni.edu.vn/api/update-face-vector"));
-      request.fields['student_id'] = studentId;
-      request.files.add(await http.MultipartFile.fromPath('photo', image.path));
+      // Tải ảnh khuôn mặt lên qua Api để có token và xử lý lỗi tập trung.
+      // Dữ liệu sinh trắc học nên tuyệt đối không đi ra ngoài kênh xác thực.
+      final response = await Api.tepLen(
+        "/api/update-face-vector",
+        duLieu: FormData.fromMap({
+          'student_id': studentId,
+          'photo': await MultipartFile.fromFile(image.path),
+        }),
+        hanCho: const Duration(seconds: 60),
+      );
+      if (!mounted) return;
 
-      var streamedResponse = await request.send();
-      var response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 200) {
+      if (response.thanhCong) {
         _showMessage("✅ Cập nhật dữ liệu khuôn mặt thành công!");
         setState(() => _imageVersion = DateTime.now().millisecondsSinceEpoch);
         widget.onAvatarUpdate?.call();
       } else {
-        _showMessage("⚠️ Không thể tạo vector khuôn mặt. Thử lại sau.");
+        _showMessage("⚠️ ${response.thongDiepLoi}");
       }
     } catch (e) {
-      _showMessage("❌ Lỗi kết nối Server AI");
+      if (mounted) _showMessage("❌ Lỗi kết nối máy chủ AI");
     } finally {
       if (mounted) setState(() => _isUpdatingFace = false);
     }

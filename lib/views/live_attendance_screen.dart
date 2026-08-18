@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'dart:async';
 import 'package:url_launcher/url_launcher.dart';
 import 'qr_generator_screen.dart';
+import '../core/api/api.dart';
 
 class LiveAttendanceScreen extends StatefulWidget {
   final int buoiHocId;
@@ -43,9 +42,9 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen> {
   // 1. Lấy thông tin mã PIN
   Future<void> _fetchLiveInfo() async {
   try {
-    final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/attendance/current-session-info/${widget.buoiHocId}"));
-    if (res.statusCode == 200) {
-      final data = jsonDecode(res.body);
+    final res = await Api.get("/api/attendance/current-session-info/${widget.buoiHocId}");
+    if (res.thanhCong) {
+      final data = res.data is Map ? res.data as Map : const {};
       if (mounted) {
         setState(() {
           if (data['code'] == "EXPIRED") {
@@ -67,9 +66,9 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen> {
   // 2. Lấy danh sách SV
   Future<void> _fetchAttendanceList() async {
     try {
-      final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/attendance/session-report/${widget.buoiHocId}"));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
+      final res = await Api.get("/api/attendance/session-report/${widget.buoiHocId}");
+      if (res.thanhCong) {
+        final data = res.data is Map ? res.data as Map : const {};
         if (mounted && data['status'] == 'success') {
           setState(() {
             _list = data['data'] ?? [];
@@ -84,12 +83,17 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen> {
   Future<void> _renewPin() async {
   setState(() => _isRefreshing = true);
   try {
-    final res = await http.post(
-      Uri.parse("https://mobi.vinhuni.edu.vn/api/attendance/refresh-pin"),
-      headers: {"Content-Type": "application/json"},
-      body: jsonEncode({"buoi_id": widget.buoiHocId, "duration": _durationMinutes.toInt()}),
+    final res = await Api.post(
+      "/api/attendance/refresh-pin",
+      duLieu: {"buoi_id": widget.buoiHocId, "duration": _durationMinutes.toInt()},
     );
-    if (res.statusCode == 200) {
+    if (!mounted) return;
+
+    if (!res.thanhCong) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res.thongDiepLoi), backgroundColor: Colors.red),
+      );
+    } else {
       // 🔥 KÍCH HOẠT LẠI TIMER: Nếu trước đó đã dừng, giờ phải chạy lại để cập nhật SV mới quét
       _timer?.cancel(); // Xóa timer cũ nếu còn
       _timer = Timer.periodic(const Duration(seconds: 4), (t) {
@@ -109,17 +113,32 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen> {
   // 4. Điểm danh thủ công
   Future<void> _updateManualStatus(String sid, int loaiVang) async {
     try {
-      await http.post(
-        Uri.parse("https://mobi.vinhuni.edu.vn/api/attendance/manual-submit"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
+      final res = await Api.post(
+        "/api/attendance/manual-submit",
+        duLieu: {
           "buoi_hoc_id": widget.buoiHocId,
           "student_id": sid,
           "loai_vang": loaiVang,
-        }),
+        },
       );
+      if (!mounted) return;
+
+      if (!res.thanhCong) {
+        // Sửa 18/08/2026: bản cũ gọi rồi bỏ qua phản hồi. Máy chủ từ chối thì
+        // giảng viên vẫn thấy màn hình như đã ghi nhận — nhưng dữ liệu điểm
+        // danh không được lưu, ảnh hưởng trực tiếp tới điểm chuyên cần.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Chưa ghi được điểm danh cho $sid: ${res.thongDiepLoi}"),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
       _fetchAttendanceList();
-    } catch (e) { debugPrint("Lỗi manual: $e"); }
+    } catch (e) {
+      debugPrint("Lỗi điểm danh thủ công: $e");
+    }
   }
 
   // 5. Kết thúc buổi học
@@ -138,15 +157,29 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen> {
   ) ?? false;
 
   if (confirm) {
-    final res = await http.post(Uri.parse("https://mobi.vinhuni.edu.vn/api/attendance/end-session/${widget.buoiHocId}"));
-    if (res.statusCode == 200) {
-      setState(() {
-        _currentPin = "ĐÃ ĐÓNG";
-        // 🔥 NGỪNG REQUEST NGAY LẬP TỨC
-        _timer?.cancel(); 
-      });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("🚩 Phiên điểm danh đã đóng. Đã ngừng đồng bộ dữ liệu.")));
+    final res = await Api.post("/api/attendance/end-session/${widget.buoiHocId}");
+    if (!mounted) return;
+
+    if (!res.thanhCong) {
+      // Không báo lỗi thì giảng viên tưởng đã đóng phiên, rời đi, trong khi mã
+      // PIN vẫn còn hiệu lực và sinh viên vắng mặt vẫn điểm danh được.
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Chưa đóng được phiên: ${res.thongDiepLoi}"),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
     }
+
+    setState(() {
+      _currentPin = "ĐÃ ĐÓNG";
+      // 🔥 NGỪNG REQUEST NGAY LẬP TỨC
+      _timer?.cancel();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("🚩 Phiên điểm danh đã đóng. Đã ngừng đồng bộ dữ liệu.")),
+    );
   }
 }
 

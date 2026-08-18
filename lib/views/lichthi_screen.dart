@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import '../services/lichthi.dart';
 import '../services/database_helper.dart';
+import '../core/api/api.dart';
+import '../core/auth/session.dart';
+import '../core/offline/cached_fetch.dart';
+import '../core/offline/dai_bao_ban_cu.dart';
 
 class LichThiScreen extends StatefulWidget {
   const LichThiScreen({super.key});
@@ -20,6 +22,10 @@ class _LichThiScreenState extends State<LichThiScreen> {
   List<dynamic> rawFilterData = [];
   List<dynamic> examData = [];
   bool isLoading = true;
+
+  /// Đúng khi máy chủ không phản hồi và màn hình đang hiển thị dữ liệu đã lưu
+  /// trên máy. Dùng để báo cho người dùng biết số liệu có thể chưa mới nhất.
+  bool dangXemBanCu = false;
   String? errorMessage;
 
   List<String> listNamHoc = [];
@@ -107,60 +113,60 @@ class _LichThiScreenState extends State<LichThiScreen> {
     });
   }
 
-  // --- 2. HÀM LẤY LỊCH THI (XỬ LÝ CACHE & API) ---
+  // --- 2. HÀM LẤY LỊCH THI ---
+  //
+  // Sửa 18/08/2026 (Pha 1): dùng chung cachedFetch thay cho đoạn
+  // "đọc đệm → hiện ngay → gọi mạng → ghi đè" từng được chép lại ở cả bốn màn
+  // lịch với bốn cách xử lý lỗi khác nhau.
+  //
+  // Điểm mới so với bản cũ: khi máy chủ lỗi, màn hình nói rõ đang xem dữ liệu
+  // cũ thay vì im lặng hiển thị số liệu có thể đã lỗi thời.
   Future<void> _fetchExams(String userId, {bool useCacheOnly = false}) async {
     final db = DatabaseHelper.instance;
-    String nam = selectedNamHoc;
-    String ky = selectedHocKy;
+    final String nam = selectedNamHoc;
+    final String ky = selectedHocKy;
 
-    // Lấy từ máy hiện lên trước
-    final cachedExams = await db.getExams(userId, nam, ky); 
-    if (cachedExams != null) {
-      setState(() {
-        examData = cachedExams;
-        isLoading = false;
-      });
-    }
-
-    if (useCacheOnly) return;
-
-    try {
-      final url = 'https://mobi.vinhuni.edu.vn/api/get-exams/$userId?nam_hoc=$nam&hoc_ky=$ky&program_id=$selectedProgramId';
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final List<dynamic> newData = json.decode(response.body);
-        await db.saveExams(userId, nam, ky, newData);
-        
-        if (mounted) {
-          setState(() {
-            examData = newData;
-            isLoading = false;
-          });
-        }
-      }
-    } catch (e) {
-      if (mounted) setState(() => isLoading = false);
-    }
+    await cachedFetch<List<dynamic>>(
+      duongDan: '/api/get-exams/$userId',
+      thamSo: {
+        'nam_hoc': nam,
+        'hoc_ky': ky,
+        'program_id': selectedProgramId,
+      },
+      hanCho: const Duration(seconds: 10),
+      chiDocTuMay: useCacheOnly,
+      docTuMay: () => db.getExams(userId, nam, ky),
+      ghiVaoMay: (duLieu) => db.saveExams(userId, nam, ky, duLieu),
+      chuyenDoi: (tho) => tho is List ? tho : <dynamic>[],
+      khiCoDuLieu: (kq) {
+        if (!mounted) return;
+        setState(() {
+          examData = kq.duLieu;
+          isLoading = false;
+          dangXemBanCu = kq.dangDungBanCu;
+        });
+      },
+    );
   }
 
   Future<void> _fetchPrograms(String userId) async {
-    try {
-      final url = 'https://mobi.vinhuni.edu.vn/api/student-programs/$userId'; 
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        setState(() {
-          programList = [
-            {"program_id": "ALL", "program_name": "Tất cả ngành học"},
-            ...data.map((e) => {
-                  "program_id": e["program_id"].toString(),
-                  "program_name": e["program_name"].toString()
-                }).toList()
-          ];
-        });
-      }
-    } catch (e) { debugPrint("Lỗi tải ngành: $e"); }
+    final res = await Api.get('/api/student-programs/$userId');
+    if (!res.thanhCong) {
+      debugPrint("⚠️ [LịchThi] Không tải được danh sách ngành: ${res.thongDiepLoi}");
+      return;
+    }
+
+    final data = res.data is List ? res.data as List : const [];
+    if (!mounted) return;
+    setState(() {
+      programList = [
+        {"program_id": "ALL", "program_name": "Tất cả ngành học"},
+        ...data.map((e) => {
+              "program_id": e["program_id"].toString(),
+              "program_name": e["program_name"].toString()
+            }),
+      ];
+    });
   }
 
   // --- 3. HELPER FORMAT ---
@@ -196,6 +202,10 @@ class _LichThiScreenState extends State<LichThiScreen> {
       body: Column(
         children: [
           _buildFilterBar(),
+          DaiBaoBanCu(
+            hienThi: dangXemBanCu,
+            khiBamTaiLai: () async => _fetchExams(await Session.userCode),
+          ),
           Expanded(
             child: isLoading && examData.isEmpty
                 ? Center(child: CircularProgressIndicator(color: vinhUniBlue))

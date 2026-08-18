@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+import '../core/api/api.dart';
 
 class BHYTScreen extends StatefulWidget {
   const BHYTScreen({super.key});
@@ -25,15 +24,19 @@ class _BHYTScreenState extends State<BHYTScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final String userId = prefs.getString('user_code') ?? prefs.getString('user_id') ?? "";
-      final response = await http.get(Uri.parse('https://mobi.vinhuni.edu.vn/api/bhyt/$userId'));
-      if (response.statusCode == 200) {
+      final response = await Api.get('/api/bhyt/$userId');
+      if (!mounted) return;
+      if (response.thanhCong) {
         setState(() {
-          data = json.decode(response.body);
+          data = response.data;
           isLoading = false;
         });
+      } else {
+        // Bản cũ không có nhánh này: máy chủ lỗi thì vòng xoay chờ quay mãi.
+        setState(() => isLoading = false);
       }
     } catch (e) {
-      setState(() => isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
   }
 

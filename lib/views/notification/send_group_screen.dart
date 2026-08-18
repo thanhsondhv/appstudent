@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'notification_helper.dart';
+import '../../core/auth/user_role.dart';
+import '../../core/api/api.dart';
 
 class SendGroupScreen extends StatefulWidget {
   final String? initialScope; 
@@ -21,7 +22,8 @@ class _SendGroupScreenState extends State<SendGroupScreen> {
   String _selectedScope = "LHP";
   String _selectedCategory = "GENERAL";
   String _senderId = "";
-  String _userRole = "canbo"; 
+  // ⚠️ Mặc định quyền THẤP NHẤT, không phải "canbo" như trước.
+  UserRole _userRole = UserRole.sinhVien;
   bool _isLoading = false, _isClassLoading = false, _isSearching = false;
 
   // Data bộ lọc chung (Năm, Kỳ)
@@ -62,7 +64,7 @@ class _SendGroupScreenState extends State<SendGroupScreen> {
     
     setState(() { 
       _senderId = code; 
-      _userRole = (prefs.getString('user_role') ?? "canbo").toLowerCase();
+      _userRole = UserRole.parse(prefs.getString('user_role'));
       if (widget.initialScope != null) _selectedScope = widget.initialScope!;
     });
 
@@ -74,9 +76,9 @@ class _SendGroupScreenState extends State<SendGroupScreen> {
   }
 
   List<String> _getAvailableScopes() {
-    if (_userRole == 'admin' || _userRole == 'ad') {
+    if (_userRole.isAdmin) {
       return ["LHP", "LOP_HC", "ASSIGNED_CLASSES", "LHP_LOW", "DEPT_COHORT"];
-    } else if (_userRole == 'covan') {
+    } else if (_userRole == UserRole.coVan) {
       return ["LHP", "LOP_HC", "ASSIGNED_CLASSES", "LHP_LOW","DEPT_COHORT"];
     }
     return ["LHP"];
@@ -89,7 +91,7 @@ class _SendGroupScreenState extends State<SendGroupScreen> {
   Future<void> _loadAllFilters(String code) async {
     if (code.isEmpty) return;
     try {
-      final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/get-filters/$code"));
+      final res = await Api.get("/api/get-filters/$code");
       if (res.statusCode == 200) {
         final List<dynamic> data = jsonDecode(res.body);
         setState(() {
@@ -104,7 +106,7 @@ class _SendGroupScreenState extends State<SendGroupScreen> {
     if (code.isEmpty) return;
     setState(() => _isClassLoading = true);
     try {
-      final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/lecturer/assigned-classes?lecturer_id=$code"));
+      final res = await Api.get("/api/lecturer/assigned-classes", thamSo: {"lecturer_id": code});
       if (res.statusCode == 200) {
         setState(() => _assignedClasses = jsonDecode(res.body)['data'] ?? []);
       }
@@ -114,7 +116,7 @@ class _SendGroupScreenState extends State<SendGroupScreen> {
   Future<void> _fetchAdminClasses(String code) async {
     if (code.isEmpty) return;
     try {
-      final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/lecturer/admin-classes/$code"));
+      final res = await Api.get("/api/lecturer/admin-classes/$code");
       if (res.statusCode == 200) {
         final result = jsonDecode(res.body);
         setState(() {
@@ -128,11 +130,16 @@ class _SendGroupScreenState extends State<SendGroupScreen> {
   Future<void> _fetchClasses() async {
     if (_selectedYear == null || _selectedSemester == null) return;
     setState(() => _isClassLoading = true);
-    final url = "https://mobi.vinhuni.edu.vn/api/lecturer/classes-filtered?lecturer_id=$_senderId&nam=$_selectedYear&ky=${Uri.encodeComponent(_selectedSemester!)}";
     try {
-      final res = await http.get(Uri.parse(url));
-      final data = jsonDecode(res.body);
-      if (data['status'] == 'success') setState(() { _classList = data['data']; _selectedClass = null; });
+      final res = await Api.get("/api/lecturer/classes-filtered", thamSo: {
+        "lecturer_id": _senderId,
+        "nam": _selectedYear,
+        "ky": _selectedSemester,
+      });
+      final data = res.data is Map ? res.data as Map : const {};
+      if (res.thanhCong && data['status'] == 'success') {
+        setState(() { _classList = data['data']; _selectedClass = null; });
+      }
     } finally { setState(() => _isClassLoading = false); }
   }
 
@@ -140,7 +147,7 @@ class _SendGroupScreenState extends State<SendGroupScreen> {
   void _showAssignedClassDetails(String tenLop) async {
     showDialog(context: context, builder: (c) => const Center(child: CircularProgressIndicator()));
     try {
-      final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/lecturer/class-details?ten_lop=${Uri.encodeComponent(tenLop)}"));
+      final res = await Api.get("/api/lecturer/class-details", thamSo: {"ten_lop": tenLop});
       Navigator.pop(context);
       if (res.statusCode == 200) {
         final List<dynamic> students = jsonDecode(res.body)['data'] ?? [];
@@ -179,7 +186,7 @@ class _SendGroupScreenState extends State<SendGroupScreen> {
 
   try {
     // 🔥 Sửa link: Thêm /$code vào cuối để khớp với API Path Parameter
-    final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/admin/get-faculties/$code"));
+    final res = await Api.get("/api/admin/get-faculties/$code");
     if (res.statusCode == 200) {
       // Backend trả về: {"status": "success", "data": {"id_khoa": "...", "ten_khoa": "..."}}
       // Vì data trả về là 1 Object chứ không phải List, Sơn bọc nó lại thành List để Dropdown đọc được
@@ -197,10 +204,12 @@ Future<void> _fetchClassesByCohort() async {
   if (_selectedFaculty == null || _selectedCohort == null) return;
   setState(() => _isClassLoading = true);
   try {
-    final res = await http.get(Uri.parse(
-        "https://mobi.vinhuni.edu.vn/api/admin/get-classes-by-cohort?id_khoa=$_selectedFaculty&cohort=$_selectedCohort"));
-    if (res.statusCode == 200) {
-      final List<dynamic> data = jsonDecode(res.body)['data'] ?? [];
+    final res = await Api.get("/api/admin/get-classes-by-cohort", thamSo: {
+      "id_khoa": _selectedFaculty,
+      "cohort": _selectedCohort,
+    });
+    if (res.thanhCong) {
+      final List<dynamic> data = (res.data is Map ? res.data['data'] : null) ?? [];
       setState(() {
         _classesInCohort = ["ALL", ...data.map((e) => e.toString())];
         _selectedClassInCohort = "ALL"; // Mặc định là chọn tất cả
@@ -215,14 +224,18 @@ Future<void> _fetchClassesByCohort() async {
       NotificationHelper.showSnack(context, "Vui lòng chọn Năm và Kỳ học!", Colors.orange); return;
     }
     setState(() => _isSearching = true);
-    final queryParams = "nam=$_selectedYear&ky=${Uri.encodeComponent(_selectedSemester!)}&threshold=${_thresholdController.text}";
+    final thamSoTimKiem = {
+      "nam": _selectedYear,
+      "ky": _selectedSemester,
+      "threshold": _thresholdController.text,
+    };
     try {
-      final resClasses = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/admin/low-enrollment-theory-classes?$queryParams"));
-      final resStudents = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/admin/low-enrollment-students?$queryParams"));
-      if (resClasses.statusCode == 200 && resStudents.statusCode == 200) {
+      final resClasses = await Api.get("/api/admin/low-enrollment-theory-classes", thamSo: thamSoTimKiem);
+      final resStudents = await Api.get("/api/admin/low-enrollment-students", thamSo: thamSoTimKiem);
+      if (resClasses.thanhCong && resStudents.thanhCong) {
         setState(() {
-          _lowEnrollmentClasses = jsonDecode(resClasses.body)['data'] ?? [];
-          _allLowStudents = jsonDecode(resStudents.body)['data'] ?? [];
+          _lowEnrollmentClasses = (resClasses.data is Map ? resClasses.data['data'] : null) ?? [];
+          _allLowStudents = (resStudents.data is Map ? resStudents.data['data'] : null) ?? [];
           _selectedMultiClassIds.clear();
         });
       }
@@ -234,19 +247,31 @@ Future<void> _fetchClassesByCohort() async {
       NotificationHelper.showSnack(context, "Vui lòng nhập nội dung!", Colors.orange); return;
     }
     String target = ""; String apiUrl = "";
-    if (_selectedScope == "LHP") { target = _selectedClass ?? ""; apiUrl = 'https://mobi.vinhuni.edu.vn/api/admin/send-notification-lhp'; } 
-    else if (_selectedScope == "LOP_HC") { target = _selectedAdminClassId ?? ""; apiUrl = 'https://mobi.vinhuni.edu.vn/api/admin/send-notification-lophc'; } 
-    else if (_selectedScope == "ASSIGNED_CLASSES") { target = _selectedAssignedClassName ?? ""; apiUrl = 'https://mobi.vinhuni.edu.vn/api/admin/send-notification-lophc'; }
-    else if (_selectedScope == "LHP_LOW") { target = _selectedMultiClassIds.join(","); apiUrl = 'https://mobi.vinhuni.edu.vn/api/admin/send-notification-multi-lhp-theory'; } 
-    else if (_selectedScope == "DEPT_COHORT") { target = "${_selectedFaculty}|K${_selectedCohort}"; apiUrl = 'https://mobi.vinhuni.edu.vn/api/admin/send-notification-dept-cohort'; }
+    if (_selectedScope == "LHP") { target = _selectedClass ?? ""; apiUrl = '/api/admin/send-notification-lhp'; }
+    else if (_selectedScope == "LOP_HC") { target = _selectedAdminClassId ?? ""; apiUrl = '/api/admin/send-notification-lophc'; }
+    else if (_selectedScope == "ASSIGNED_CLASSES") { target = _selectedAssignedClassName ?? ""; apiUrl = '/api/admin/send-notification-lophc'; }
+    else if (_selectedScope == "LHP_LOW") { target = _selectedMultiClassIds.join(","); apiUrl = '/api/admin/send-notification-multi-lhp-theory'; }
+    else if (_selectedScope == "DEPT_COHORT") { target = "${_selectedFaculty}|K${_selectedCohort}"; apiUrl = '/api/admin/send-notification-dept-cohort'; }
 
     if (target.isEmpty) { NotificationHelper.showSnack(context, "Vui lòng chọn đối tượng!", Colors.red); return; }
     setState(() => _isLoading = true);
     try {
       final body = { "sender_id": _senderId, "scope": _selectedScope, "target_id": target, "title": _titleController.text.trim(), "content": _contentController.text.trim(), "image_url": _imageUrlController.text.trim() };
-      final res = await http.post(Uri.parse(apiUrl), headers: {'Content-Type': 'application/json'}, body: jsonEncode(body));
-      if (res.statusCode == 200) { NotificationHelper.showSnack(context, "Gửi thành công!", Colors.green); Navigator.pop(context); }
-    } catch (e) { NotificationHelper.showSnack(context, "Lỗi kết nối", Colors.red); }
+      final res = await Api.post(apiUrl, duLieu: body);
+      if (!mounted) return;
+
+      if (res.thanhCong) {
+        NotificationHelper.showSnack(context, "Gửi thành công!", Colors.green);
+        Navigator.pop(context);
+      } else {
+        // Sửa 18/08/2026: bản cũ không có nhánh này. Máy chủ từ chối thì màn
+        // hình im lặng, người gửi không biết tin đã đi hay chưa — với màn gửi
+        // hàng loạt thì đó là chuyện lớn.
+        NotificationHelper.showSnack(context, res.thongDiepLoi, Colors.red);
+      }
+    } catch (e) {
+      if (mounted) NotificationHelper.showSnack(context, "Lỗi kết nối máy chủ", Colors.red);
+    }
     finally { setState(() => _isLoading = false); }
   }
 

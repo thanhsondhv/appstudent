@@ -1,0 +1,119 @@
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../services/notification_service.dart';
+
+class LoginHandler {
+  static const _storage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+
+  /// 🔥 BẮT TAY BẢO MẬT: Nhận token từ Deep Link -> Lấy thông tin & Chìa khóa OneDrive
+  static Future<void> verifySessionAndLogin(BuildContext context, String sessionToken) async {
+    try {
+      final response = await http.post(
+        Uri.parse('https://mobi.vinhuni.edu.vn/api/auth/verify-session'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"session_token": sessionToken}),
+      );
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        if (result['status'] == 'success') {
+          final userData = result['data'];
+          final prefs = await SharedPreferences.getInstance();
+          
+          // Kiểm tra xem người dùng ĐÃ đăng nhập App chưa
+          bool alreadyLoggedIn = prefs.getBool('is_logged_in') ?? false;
+
+          if (alreadyLoggedIn) {
+            // TRƯỜNG HỢP 1: Chỉ cập nhật Token (Dành cho việc Re-connect OneDrive)
+            if (userData['ms_access_token'] != null) {
+              await prefs.setString('ms_access_token', userData['ms_access_token']);
+              
+              // 🔥 Ép thêm hạn 1 tiếng khi Re-connect
+              await prefs.setInt('ms_token_expiry', DateTime.now().millisecondsSinceEpoch + 3500000);
+              debugPrint("🔄 [Handler] Đã làm mới Microsoft Token thành công!");
+              
+              // Thông báo cho người dùng
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Đã kết nối lại OneDrive!"), backgroundColor: Colors.green)
+                );
+              }
+            }
+          } else {
+            // TRƯỜNG HỢP 2: Đăng nhập mới hoàn toàn (Vào trang Home)
+            await executeSuccessfulLogin(
+              context,
+              userData['user_id'].toString(),
+              userData['full_name'] ?? "Thành viên",
+              role: userData['role'] ?? userData['user_role'],
+              accessToken: userData['access_token'],
+              msAccessToken: userData['ms_access_token'],
+            );
+          }
+        }
+      }
+    } catch (e) { debugPrint("❌ Lỗi Handshake: $e"); }
+  }
+
+  /// Hàm lưu dữ liệu tổng thể vào máy
+  static Future<void> executeSuccessfulLogin(
+      BuildContext context, String userId, String fullName, 
+      {String? role, String? accessToken, String? msAccessToken}) async { 
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      String cleanId = userId.replaceAll(RegExp(r'[^0-9]'), '');
+      if (cleanId.isEmpty) cleanId = userId;
+
+      await prefs.setString('user_id', cleanId);
+      await prefs.setString('user_code', cleanId);
+      await prefs.setString('full_name', fullName);
+      await prefs.setString('user_role', role ?? 'SinhVien'); 
+      await prefs.setBool('is_logged_in', true);
+
+      // 🛡️ Lưu Access Token hệ thống
+      if (accessToken != null) {
+        await prefs.setString('access_token', accessToken);
+        debugPrint("✅ [Handler] Đã lưu JWT Token cho $role");
+      }
+
+      // 📁 LƯU CHÌA KHÓA ONEDRIVE (Dành cho màn hình Cloud Data)
+      if (msAccessToken != null && msAccessToken.isNotEmpty) {
+        await prefs.setString('ms_access_token', msAccessToken);
+        
+        // 🔥 CHÌA KHÓA FIX LỖI Ở ĐÂY: Ép thêm hạn 1 tiếng để hàm gác cổng không bị nhầm lẫn
+        await prefs.setInt('ms_token_expiry', DateTime.now().millisecondsSinceEpoch + 3500000);
+        
+        debugPrint("✅ [Handler] Đã lưu Microsoft Access Token thành công!");
+      }
+
+      // Đồng bộ thông báo
+      NotificationService.syncTokenToServer(cleanId);
+      
+      try {
+        await FirebaseMessaging.instance.subscribeToTopic("vinhuni_all_users");
+      } catch (e) { debugPrint("⚠️ Firebase Error: $e"); }
+
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      if (context.mounted) {
+        Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+      }
+    } catch (e) {
+      debugPrint("❌ Lỗi LoginHandler: $e");
+    }
+  }
+
+  static Future<bool> isFaceRegistered(String numericId, String loginUserName) async {
+    try {
+      String? savedUser = await _storage.read(key: 'bio_user');
+      return (savedUser == loginUserName || savedUser == numericId);
+    } catch (e) { return false; }
+  }
+}

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Lịch học - {{ student_name }}</title>
+    <style>
+        :root { --primary: #0056b3; --accent: #e74c3c; --bg: #f4f7f6; }
+        body { display: flex; min-height: 100vh; margin: 0; font-family: -apple-system, system-ui, sans-serif; background: var(--bg); }
+
+        /* Sidebar cho Desktop */
+        .sidebar { width: 240px; background: var(--primary); color: white; padding: 25px 15px; flex-shrink: 0; transition: 0.3s; z-index: 1000; }
+        .nav-item { display: block; color: white; text-decoration: none; padding: 12px 15px; border-radius: 8px; margin-bottom: 8px; }
+        .nav-item.active { background: rgba(255,255,255,0.2); font-weight: bold; border-left: 4px solid #fff; }
+        .main-content { flex: 1; padding: 20px; overflow-x: hidden; background: white; }
+
+        /* Menu cho Mobile */
+        .menu-btn { display: none; position: fixed; top: 15px; left: 15px; background: var(--primary); color: white; border: none; padding: 10px; border-radius: 5px; z-index: 1100; }
+
+        /* Filter Row */
+        .filter-container { background: #fff; padding: 15px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #eee; }
+        .filter-form { display: flex; gap: 15px; align-items: flex-end; flex-wrap: wrap; }
+        .filter-group { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 140px; }
+        .filter-group select { padding: 10px; border-radius: 6px; border: 1px solid #ddd; outline: none; }
+
+        /* Table */
+        .table-wrapper { overflow-x: auto; border: 1px solid #eee; border-radius: 8px; }
+        table { width: 100%; border-collapse: collapse; min-width: 600px; }
+        th { background: #f8f9fa; color: var(--primary); padding: 12px; text-align: left; font-size: 11px; }
+        td { padding: 12px; border-bottom: 1px solid #f2f2f2; font-size: 13px; }
+        .room-tag { background: var(--accent); color: white; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+
+        @media (max-width: 768px) {
+            .menu-btn { display: block; }
+            .sidebar { position: fixed; left: -240px; top: 0; height: 100%; }
+            .sidebar.open { left: 0; }
+            .main-content { padding-top: 65px; }
+            .filter-form { flex-direction: column; }
+            .filter-group { width: 100%; }
+            .sidebar-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; }
+            .sidebar-overlay.show { display: block; }
+        }
+    </style>
+</head>
+<body>
+    <button class="menu-btn" onclick="toggleSidebar()">☰ MENU</button>
+    <div id="overlay" class="sidebar-overlay" onclick="toggleSidebar()"></div>
+
+    <div class="sidebar" id="sidebar">
+        <h2>VINH UNI</h2>
+        <a href="/dashboard/{{ student_id }}" class="nav-item">🔔 Thông báo</a>
+        <a href="/schedule/{{ student_id }}" class="nav-item active">📅 Lịch học</a>
+        <a href="/grades/{{ student_id }}" class="nav-item">📊 Bảng điểm</a>
+        <a href="/exams/{{ student_id }}" class="nav-item">📝 Lịch thi</a>
+        <a href="/logout" class="nav-item" style="margin-top: 20px; color: #ffb3b3;">🚪 Đăng xuất</a>
+    </div>
+
+    <div class="main-content">
+        <div class="filter-container">
+            <form method="get" id="filterForm" class="filter-form">
+                <div class="filter-group">
+                    <label>Năm học</label>
+                    <select name="nam_hoc" onchange="this.form.submit()">
+                        <option value="ALL">-- Tất cả --</option>
+                        {% for y in years %}<option value="{{ y }}" {% if selected_year == y %}selected{% endif %}>{{ y }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Học kỳ</label>
+                    <select name="hoc_ky" onchange="this.form.submit()">
+                        <option value="ALL">-- Tất cả --</option>
+                        {% for s in semesters %}<option value="{{ s }}" {% if selected_semester == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>Tuần học</label>
+                    <select name="tuan" onchange="this.form.submit()">
+                        <option value="">-- Chọn tuần --</option>
+                        {% for w in weeks %}<option value="{{ w.tuan }}" {% if selected_week == w.tuan|string %}selected{% endif %}>Tuần {{ w.tuan }} ({{ w.range }})</option>{% endfor %}
+                    </select>
+                </div>
+            </form>
+        </div>
+
+        <h3 style="color: var(--primary);">Lịch học: {{ student_name }}</h3>
+
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr><th>Ngày học</th><th>Môn học</th><th>Tiết</th><th>Phòng</th><th>Tuần</th></tr>
+                </thead>
+                <tbody>
+                    {% for item in schedule %}
+                    <tr>
+                        <td><b>{{ item.NgayHoc }}</b><br><small>{{ item.Thu }}</small></td>
+                        <td><div style="font-weight:bold;">{{ item.TenLop }}</div></td>
+                        <td>Tiết {{ item.Tiet }}</td>
+                        <td><span class="room-tag">{{ item.Phong }}</span></td>
+                        <td>Tuần {{ item.Tuan }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+            document.getElementById('overlay').classList.toggle('show');
+        }
+    </script>
+</body>
+</html>

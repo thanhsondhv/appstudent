@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cổng quản trị VinhUni</title>
+<!--
+  Cổng quản trị — bản khung chạy được ngay, không cần công cụ dựng.
+
+  Vì sao một tệp HTML thay vì React như tài liệu thiết kế đề ra:
+    • Chạy được ngay hôm nay, không cần cài Node, không cần bước dựng.
+    • Không phụ thuộc thư viện ngoài — máy chủ trong mạng nội bộ vẫn dùng được.
+    • Đủ để giám sát hệ thống, là việc cấp bách nhất hiện nay.
+
+  Khi cần các bảng dữ liệu lớn có sắp xếp, lọc, xuất Excel và thao tác hàng loạt
+  (điểm danh cả lớp, duyệt hàng loạt đơn xin nghỉ) thì chuyển sang React + TypeScript
+  theo đúng tài liệu thiết kế. Các endpoint /api/admin/* dùng lại được nguyên vẹn.
+
+  Thêm ngày 18/08/2026.
+-->
+<style>
+  :root {
+    --xanh: #0054A6; --xanh-dam: #00305F; --xanh-nhat: #E7EFF8;
+    --nen: #F4F7FA; --the: #FFFFFF; --vien: #DCE3EA;
+    --chu: #131822; --chu-nhat: #5A6879;
+    --tot: #1D6A4C; --tot-nen: #E4F2EB;
+    --canh-bao: #96631A; --canh-bao-nen: #FBF2E1;
+    --loi: #B23A2E; --loi-nen: #FBEBE8;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--nen); color: var(--chu);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    background: var(--xanh); color: #fff; padding: 14px 24px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { margin: 0; font-size: 17px; letter-spacing: -.01em; }
+  header .phu { font-size: 13px; opacity: .85; }
+  header .day { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--vien);
+    background: var(--the); color: var(--chu); padding: 7px 14px;
+  }
+  button.chinh { background: var(--xanh); color: #fff; border-color: var(--xanh); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  main { max-width: 1180px; margin: 0 auto; padding: 22px 24px 60px; }
+
+  .luoi { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+  .the {
+    background: var(--the); border: 1px solid var(--vien); border-radius: 9px;
+    padding: 16px 18px;
+  }
+  .the h2 {
+    margin: 0 0 12px; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .09em; color: var(--chu-nhat); font-family: var(--mono);
+  }
+  .so { font-size: 30px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .nhan { font-size: 13px; color: var(--chu-nhat); }
+
+  .cham { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; }
+  .cham.ok { background: var(--tot); } .cham.xau { background: var(--loi); }
+  .cham.cho { background: var(--canh-bao); }
+
+  .hang { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0;
+          border-bottom: 1px solid var(--vien); font-size: 14px; }
+  .hang:last-child { border-bottom: 0; }
+  .hang b { font-weight: 600; }
+
+  .bao { border-radius: 8px; padding: 11px 14px; margin-bottom: 9px; font-size: 14px;
+         border-left: 3px solid; }
+  .bao.nghiem_trong { background: var(--loi-nen); border-color: var(--loi); color: var(--loi); }
+  .bao.canh_bao { background: var(--canh-bao-nen); border-color: var(--canh-bao); color: var(--canh-bao); }
+  .bao.thong_tin { background: var(--xanh-nhat); border-color: var(--xanh); color: var(--xanh-dam); }
+
+  .cuon { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 640px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--vien); }
+  th { font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+       letter-spacing: .07em; color: var(--chu-nhat); background: var(--nen); }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+  .the-rong { color: var(--chu-nhat); font-size: 14px; padding: 18px 0; text-align: center; }
+
+  section { margin-top: 26px; }
+  section > h2 { font-size: 18px; margin: 0 0 12px; letter-spacing: -.015em; }
+
+  #dangnhap {
+    max-width: 380px; margin: 90px auto; background: var(--the);
+    border: 1px solid var(--vien); border-radius: 11px; padding: 30px;
+  }
+  #dangnhap h2 { margin: 0 0 6px; font-size: 19px; }
+  #dangnhap p { margin: 0 0 20px; font-size: 14px; color: var(--chu-nhat); }
+  #dangnhap label { display: block; font-size: 13px; margin: 12px 0 5px; font-weight: 600; }
+  #dangnhap input {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--vien);
+    border-radius: 6px; font: inherit;
+  }
+  #dangnhap button { width: 100%; margin-top: 18px; padding: 11px; }
+  #loi-dn { color: var(--loi); font-size: 13.5px; margin-top: 12px; min-height: 20px; }
+  .an { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- ================= ĐĂNG NHẬP ================= -->
+<div id="dangnhap">
+  <h2>Cổng quản trị VinhUni</h2>
+  <p>Dành cho cán bộ và quản trị hệ thống.</p>
+  <label for="tk">Tài khoản</label>
+  <input id="tk" autocomplete="username" placeholder="Mã cán bộ">
+  <label for="mk">Mật khẩu</label>
+  <input id="mk" type="password" autocomplete="current-password">
+  <button class="chinh" id="nut-dn">Đăng nhập</button>
+  <div id="loi-dn"></div>
+</div>
+
+<!-- ================= BẢNG ĐIỀU KHIỂN ================= -->
+<div id="bang" class="an">
+  <header>
+    <div>
+      <h1>Cổng quản trị VinhUni</h1>
+      <div class="phu" id="thong-tin-nd"></div>
+    </div>
+    <div class="day">
+      <span class="phu" id="cap-nhat-luc"></span>
+      <button id="nut-lam-moi">Làm mới</button>
+      <button id="nut-thoat">Thoát</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="canh-bao-cau-hinh"></div>
+
+    <div class="luoi">
+      <div class="the">
+        <h2>Cơ sở dữ liệu</h2>
+        <div id="csdl"></div>
+      </div>
+      <div class="the">
+        <h2>Trợ lý AI · 24 giờ</h2>
+        <div id="ai"></div>
+      </div>
+      <div class="the">
+        <h2>Ký số văn bản</h2>
+        <div id="kyso"></div>
+      </div>
+      <div class="the">
+        <h2>Nghiệp vụ</h2>
+        <div id="nghiepvu"></div>
+      </div>
+    </div>
+
+    <section>
+      <h2>Tiến trình đồng bộ</h2>
+      <div class="the"><div id="dongbo"></div></div>
+    </section>
+
+    <section>
+      <h2>Nhật ký trợ lý AI</h2>
+      <div class="the">
+        <div style="margin-bottom:12px; display:flex; gap:8px; flex-wrap:wrap">
+          <button data-loc="">Tất cả</button>
+          <button data-loc="CHAN_CHEN_LENH">Bị chặn vì chèn lệnh</button>
+          <button data-loc="CHAN_TAN_SUAT">Bị chặn vì quá tần suất</button>
+        </div>
+        <div class="cuon"><table id="bang-ai">
+          <thead><tr>
+            <th>Thời điểm</th><th>Sự kiện</th><th>Vai trò</th>
+            <th>Câu hỏi (đã che dữ liệu cá nhân)</th><th>Người dùng</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+"use strict";
+
+const KHOA_TOKEN = "vinhuni_admin_token";
+let token = sessionStorage.getItem(KHOA_TOKEN) || "";
+let locHienTai = "";
+
+// --- Gọi API ---------------------------------------------------------------
+
+async function goi(duongDan, tuyChon = {}) {
+  const res = await fetch(duongDan, {
+    ...tuyChon,
+    headers: { "Authorization": "Bearer " + token, ...(tuyChon.headers || {}) },
+  });
+  if (res.status === 401) { dangXuat(); throw new Error("Phiên đã hết hạn"); }
+  if (res.status === 403) throw new Error("Tài khoản không có quyền quản trị");
+  if (!res.ok) {
+    let ct = "";
+    try { ct = (await res.json()).detail || ""; } catch (_) { /* không sao */ }
+    throw new Error(ct || `Lỗi ${res.status}`);
+  }
+  return res.json();
+}
+
+// --- Đăng nhập -------------------------------------------------------------
+
+async function dangNhap() {
+  const nut = document.getElementById("nut-dn");
+  const oLoi = document.getElementById("loi-dn");
+  nut.disabled = true;
+  oLoi.textContent = "";
+  try {
+    const res = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: document.getElementById("tk").value.trim(),
+        password: document.getElementById("mk").value,
+      }),
+    });
+    const data = await res.json();
+    if (data.status !== "success" || !data.data?.access_token) {
+      throw new Error(data.message || "Sai tài khoản hoặc mật khẩu");
+    }
+    token = data.data.access_token;
+    sessionStorage.setItem(KHOA_TOKEN, token);
+    document.getElementById("thong-tin-nd").textContent =
+      `${data.data.full_name || ""} · ${data.data.user_role || data.data.role || ""}`;
+    await hienBang();
+  } catch (e) {
+    oLoi.textContent = e.message;
+  } finally {
+    nut.disabled = false;
+  }
+}
+
+function dangXuat() {
+  token = "";
+  sessionStorage.removeItem(KHOA_TOKEN);
+  document.getElementById("bang").classList.add("an");
+  document.getElementById("dangnhap").classList.remove("an");
+}
+
+async function hienBang() {
+  document.getElementById("dangnhap").classList.add("an");
+  document.getElementById("bang").classList.remove("an");
+  await Promise.all([napTongQuan(), napNhatKy()]);
+}
+
+// --- Nạp dữ liệu -----------------------------------------------------------
+
+function hang(nhan, giaTri) {
+  return `<div class="hang"><span class="nhan">${nhan}</span><b>${giaTri}</b></div>`;
+}
+
+function chamTrangThai(ok, chu) {
+  return `<span class="cham ${ok ? "ok" : "xau"}"></span>${chu}`;
+}
+
+async function napTongQuan() {
+  let d;
+  try {
+    d = await goi("/api/admin/tong-quan");
+  } catch (e) {
+    document.getElementById("canh-bao-cau-hinh").innerHTML =
+      `<div class="bao nghiem_trong">${e.message}</div>`;
+    return;
+  }
+
+  // Cảnh báo cấu hình
+  document.getElementById("canh-bao-cau-hinh").innerHTML =
+    (d.cau_hinh || []).map(v => `<div class="bao ${v.muc}">${v.noi_dung}</div>`).join("");
+
+  // Cơ sở dữ liệu
+  const db = d.csdl || {};
+  document.getElementById("csdl").innerHTML =
+    `<div class="so">${chamTrangThai(db.ket_noi_duoc, db.ket_noi_duoc ? "Bình thường" : "Mất kết nối")}</div>`
+    + hang("Máy chủ", db.may_chu || "—")
+    + (db.thoi_gian_ms != null ? hang("Phản hồi", db.thoi_gian_ms + " ms") : "")
+    + (db.loi ? `<div class="bao nghiem_trong" style="margin-top:10px">${db.loi}</div>` : "");
+
+  // Trợ lý AI
+  const ai = d.tro_ly_ai || {};
+  if (ai.co_nhat_ky) {
+    const t = ai.trong_24_gio;
+    document.getElementById("ai").innerHTML =
+      `<div class="so">${t.tong_luot}</div><div class="nhan">lượt hỏi · ${t.so_nguoi_dung} người</div>`
+      + hang("Trả lời thành công", t.tra_loi_thanh_cong)
+      + hang("Chặn vì chèn lệnh", t.chan_chen_lenh)
+      + hang("Chặn vì quá tần suất", t.chan_tan_suat)
+      + hang("Thời gian trung bình", t.thoi_gian_tb_ms + " ms");
+  } else {
+    document.getElementById("ai").innerHTML = `<div class="the-rong">Chưa có nhật ký</div>`;
+  }
+
+  // Ký số
+  const ks = d.ky_so || {};
+  document.getElementById("kyso").innerHTML =
+    `<div class="so">${chamTrangThai(ks.da_cau_hinh, ks.da_cau_hinh ? "Sẵn sàng" : "Chưa cấu hình")}</div>`
+    + hang("Phương thức", ks.phuong_thuc || "—")
+    + hang("Mức tối đa", ks.muc_toi_da || "—")
+    + hang("Dấu thời gian", ks.co_dau_thoi_gian ? "Có" : "Không")
+    + (ks.canh_bao || []).map(c => `<div class="bao canh_bao" style="margin-top:8px">${c}</div>`).join("");
+
+  document.getElementById("cap-nhat-luc").textContent =
+    "Cập nhật " + new Date().toLocaleTimeString("vi-VN");
+
+  // Đồng bộ
+  const db2 = d.dong_bo || {};
+  const ten = {
+    dong_bo_du_lieu: "Đồng bộ dữ liệu đào tạo",
+    gui_thong_bao: "Gửi thông báo đẩy",
+    dong_bo_lms: "Đồng bộ hệ thống học tập",
+  };
+  document.getElementById("dongbo").innerHTML = Object.entries(db2).map(([k, v]) =>
+    `<div class="hang">
+       <span>${chamTrangThai(v.binh_thuong, ten[k] || k)}</span>
+       <b>${v.chay_gan_nhat
+            ? `${v.tre_phut} phút trước`
+            : (v.ghi_chu || "Chưa chạy")}</b>
+     </div>`
+  ).join("") || `<div class="the-rong">Không có thông tin</div>`;
+
+  // Nghiệp vụ
+  try {
+    const n = await goi("/api/admin/thong-ke");
+    document.getElementById("nghiepvu").innerHTML =
+      `<div class="so">${n.thong_bao_hom_nay ?? "—"}</div><div class="nhan">thông báo hôm nay</div>`
+      + hang("Đang chờ gửi", n.thong_bao_cho_gui ?? "—")
+      + hang("Phiên đang mở", n.phien_dang_mo ?? "—")
+      + hang("Đã cài ứng dụng", n.da_cai_ung_dung ?? "—")
+      + hang("Tài khoản bị khóa", n.tai_khoan_bi_khoa ?? "—");
+  } catch (e) {
+    document.getElementById("nghiepvu").innerHTML =
+      `<div class="bao canh_bao">${e.message}</div>`;
+  }
+}
+
+async function napNhatKy() {
+  const tbody = document.querySelector("#bang-ai tbody");
+  try {
+    const q = locHienTai ? `?chi_su_kien=${encodeURIComponent(locHienTai)}` : "";
+    const d = await goi("/api/admin/nhat-ky-ai" + q);
+    if (!d.danh_sach.length) {
+      tbody.innerHTML = `<tr><td colspan="5" class="the-rong">Không có bản ghi nào</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = d.danh_sach.map(r => `
+      <tr>
+        <td class="mono">${new Date(r.thoi_diem).toLocaleString("vi-VN")}</td>
+        <td>${r.su_kien || ""}</td>
+        <td>${r.vai_tro || ""}</td>
+        <td>${(r.cau_hoi || "").slice(0, 110)}</td>
+        <td class="mono">${(r.nguoi_dung_hash || "").slice(0, 8)}</td>
+      </tr>`).join("");
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" class="bao nghiem_trong">${e.message}</td></tr>`;
+  }
+}
+
+// --- Gắn sự kiện -----------------------------------------------------------
+
+document.getElementById("nut-dn").addEventListener("click", dangNhap);
+document.getElementById("mk").addEventListener("keydown", e => {
+  if (e.key === "Enter") dangNhap();
+});
+document.getElementById("nut-thoat").addEventListener("click", dangXuat);
+document.getElementById("nut-lam-moi").addEventListener("click", () => {
+  napTongQuan(); napNhatKy();
+});
+document.querySelectorAll("[data-loc]").forEach(b => {
+  b.addEventListener("click", () => {
+    locHienTai = b.dataset.loc;
+    document.querySelectorAll("[data-loc]").forEach(x => x.classList.remove("chinh"));
+    b.classList.add("chinh");
+    napNhatKy();
+  });
+});
+
+// Tự làm mới mỗi phút khi đang mở bảng điều khiển
+setInterval(() => {
+  if (token && !document.getElementById("bang").classList.contains("an")) napTongQuan();
+}, 60000);
+
+// Khôi phục phiên nếu còn token trong tab này
+if (token) hienBang().catch(dangXuat);
+</script>
+</body>
+</html>

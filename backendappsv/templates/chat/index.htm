@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VinhUni Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script> <style>
+        body { background-color: #f3f4f6; }
+        .message-box { height: calc(100vh - 80px); overflow-y: auto; padding-bottom: 20px; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <div id="app" class="flex flex-col h-screen">
+        <div id="chat-messages" class="message-box p-4 space-y-3">
+            <div class="text-center text-gray-400 text-sm">Đang kết nối hệ thống...</div>
+        </div>
+
+        <div class="bg-white p-3 border-t flex items-center space-x-2 fixed bottom-0 w-full">
+            <input type="text" id="msg-input" 
+                   class="flex-1 bg-gray-100 border-none rounded-full px-4 py-2 focus:ring-2 focus:ring-blue-500 outline-none" 
+                   placeholder="Nhập tin nhắn...">
+            <button onclick="sendMessage()" 
+                    class="bg-blue-600 text-white rounded-full p-2 w-10 h-10 flex items-center justify-center hover:bg-blue-700 transition">
+                <svg viewBox="0 0 24 24" class="w-5 h-5 fill-current"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+        // 1. Cấu hình Firebase (Lấy từ Firebase Console của bạn)
+        const firebaseConfig = {
+            apiKey: "AIzaSy...", 
+            authDomain: "vinhuni-portal-student.firebaseapp.com",
+            projectId: "vinhuni-portal-student",
+            storageBucket: "vinhuni-portal-student.appspot.com",
+            messagingSenderId: "...",
+            appId: "..."
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // 2. Lấy tham số từ App Flutter truyền qua URL
+        const params = new URLSearchParams(window.location.search);
+        const groupId = params.get('groupId') || 'group_test_01'; // ID nhóm từ ảnh của Sơn
+        const userCode = params.get('userCode') || 'Khách';
+        const userId = params.get('userId') || 'CB1679'; // Dùng để check Rules
+
+        // 3. Đăng nhập để vượt qua Security Rules
+        signInAnonymously(auth).then(() => {
+            console.log("Auth thành công");
+            listenMessages();
+        }).catch(err => console.error("Auth lỗi:", err));
+
+        // 4. Lắng nghe tin nhắn thời gian thực
+        function listenMessages() {
+            const q = query(collection(db, "groups", groupId, "messages"), orderBy("createdAt", "asc"));
+            
+            onSnapshot(q, (snapshot) => {
+                const container = document.getElementById('chat-messages');
+                container.innerHTML = ''; // Xóa cũ hiện mới
+                
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    const isMe = data.senderId === userId;
+                    
+                    const msgHtml = `
+                        <div class="flex ${isMe ? 'justify-end' : 'justify-start'}">
+                            <div class="${isMe ? 'bg-blue-600 text-white' : 'bg-white text-gray-800'} 
+                                        max-w-[80%] rounded-2xl px-4 py-2 shadow-sm">
+                                <p class="text-xs ${isMe ? 'text-blue-100' : 'text-gray-400'} mb-1">${data.senderName || data.senderId}</p>
+                                <p class="text-sm">${data.text}</p>
+                            </div>
+                        </div>
+                    `;
+                    container.insertAdjacentHTML('beforeend', msgHtml);
+                });
+                container.scrollTop = container.scrollHeight; // Tự cuộn xuống dưới cùng
+            });
+        }
+
+        // 5. Hàm gửi tin nhắn
+        window.sendMessage = async () => {
+            const input = document.getElementById('msg-input');
+            const text = input.value.trim();
+            if (!text) return;
+
+            try {
+                await addDoc(collection(db, "groups", groupId, "messages"), {
+                    text: text,
+                    senderId: userId,
+                    senderName: userCode,
+                    createdAt: serverTimestamp()
+                });
+                input.value = '';
+            } catch (e) {
+                alert("Lỗi gửi tin: " + e.message);
+            }
+        };
+
+        // Gửi bằng phím Enter
+        document.getElementById('msg-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+    </script>
+</body>
+</html>

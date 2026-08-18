@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import '../core/auth/user_role.dart';
+import '../core/api/api.dart';
 
 class NotificationSettingsScreen extends StatefulWidget {
   final String userId;
@@ -29,8 +29,7 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
   // 🔥 Định nghĩa các mục hiển thị (Sửa lỗi khớp Group Name)
   void _initCategoryDefinition() {
     // Kiểm tra vai trò để hiện menu tương ứng
-    bool isStaff = widget.userRole.toLowerCase().contains("canbo") || 
-                   widget.userRole.toLowerCase().contains("giangvien");
+    final bool isStaff = UserRole.parse(widget.userRole).isStaff;
     
     if (isStaff) {
       categories = [
@@ -52,14 +51,10 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
 
   Future<void> _loadSettingsFromServer() async {
     try {
-      final url = "https://mobi.vinhuni.edu.vn/api/notifications/settings/${widget.userId}";
-      debugPrint("📡 Đang gọi API: $url");
-      
-      final res = await http.get(Uri.parse(url));
-      
-      if (res.statusCode == 200) {
-        final List data = jsonDecode(res.body);
-        debugPrint("✅ Dữ liệu nhận về: ${res.body}");
+      final res = await Api.get('/api/notifications/settings/${widget.userId}');
+
+      if (res.thanhCong) {
+        final List data = res.data is List ? res.data as List : const [];
 
         Map<String, Map<String, dynamic>> temp = {};
         for (var item in data) {
@@ -87,15 +82,14 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
     setState(() => _settingsMap[cid] = {"enabled": val, "time": time});
     
     try {
-      await http.post(
-        Uri.parse("https://mobi.vinhuni.edu.vn/api/notifications/update"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
+      await Api.post(
+        "/api/notifications/update",
+        duLieu: {
           "user_id": widget.userId, 
           "category": cid, 
           "is_enabled": val, 
           "lead_time": time
-        }),
+        },
       );
     } catch (e) {
       debugPrint("❌ Update failed: $e");

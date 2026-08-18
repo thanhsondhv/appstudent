@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chính sách Bảo mật - VinhUni Student</title>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            line-height: 1.7; 
+            color: #2c3e50; 
+            max-width: 900px; 
+            margin: 0 auto; 
+            padding: 30px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        }
+        h1 { color: #0054A6; border-bottom: 3px solid #0054A6; padding-bottom: 15px; text-align: center; text-transform: uppercase; font-size: 24px; }
+        h2 { color: #0054A6; margin-top: 30px; border-left: 5px solid #0054A6; padding-left: 15px; font-size: 20px; }
+        .update-date { font-style: italic; color: #7f8c8d; text-align: center; margin-bottom: 30px; }
+        
+        .highlight-box { 
+            background-color: #e3f2fd; 
+            border: 1px solid #2196f3; 
+            padding: 20px; 
+            border-radius: 8px; 
+            margin: 25px 0; 
+        }
+        .highlight-box h3 { color: #0d47a1; margin-top: 0; }
+        
+        ul { margin-top: 10px; }
+        li { margin-bottom: 10px; }
+        strong { color: #2c3e50; }
+        a { color: #0054A6; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        
+        .footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid #eee; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>CHÍNH SÁCH BẢO MẬT ỨNG DỤNG VINHUNI STUDENT</h1>
+        <p class="update-date">Cập nhật lần cuối: Ngày 27 tháng 02 năm 2026</p>
+
+        <p>Chào mừng bạn đến với ứng dụng <strong>VinhUni Student</strong>. Chúng tôi tôn trọng quyền riêng tư của bạn và cam kết bảo vệ dữ liệu cá nhân theo các tiêu chuẩn bảo mật cao nhất dành cho môi trường giáo dục và các quy định của Apple App Store.</p>
+
+        <h2>1. Thông tin chúng tôi thu thập</h2>
+        <p>Để cung cấp các tính năng quản lý học tập cá nhân hóa, ứng dụng thu thập:</p>
+        <ul>
+            <li><strong>Thông tin định danh:</strong> Họ tên, Mã sinh viên, Email công vụ (xác thực qua hệ thống Microsoft Office 365).</li>
+            <li><strong>Dữ liệu học thuật:</strong> Lịch học, lịch thi, kết quả học tập và thông tin lớp học từ hệ thống SQL nội bộ của nhà trường.</li>
+            <li><strong>Dữ liệu sinh trắc học:</strong> Vector đặc trưng khuôn mặt dùng cho tính năng đăng nhập nhanh (Face ID). <em>Lưu ý: Chúng tôi chỉ xử lý dữ liệu này trên máy chủ nội bộ, không chia sẻ ra ngoài.</em></li>
+            <li><strong>Thông tin tương tác AI:</strong> Các câu hỏi và nội dung yêu cầu mà bạn nhập vào Trợ lý ảo.</li>
+        </ul>
+
+        <h2>2. Cách thức sử dụng thông tin</h2>
+        <p>Dữ liệu được sử dụng duy nhất cho các mục đích:</p>
+        <ul>
+            <li>Hiển thị và cập nhật lịch trình học tập, thông tin đào tạo cá nhân.</li>
+            <li>Xử lý truy vấn thông tin quy chế, thủ tục hành chính thông qua Trợ lý AI.</li>
+            <li>Gửi thông báo đẩy (Push Notifications) về các thay đổi trong học kỳ và tin tức nhà trường.</li>
+        </ul>
+
+        <div class="highlight-box">
+            <h3>6. Trợ lý AI và Bảo mật dữ liệu với Công nghệ RAG</h3>
+            <p>Ứng dụng của chúng tôi sử dụng kiến trúc <strong>RAG (Retrieval-Augmented Generation)</strong> tiên tiến để tối ưu hóa tính bảo mật khi tương tác với Trí tuệ nhân tạo (AI):</p>
+            <ul>
+                <li><strong>Truy vấn nội bộ (Local Retrieval):</strong> Khi bạn đặt câu hỏi về lịch học hoặc điểm số, ứng dụng sẽ thực hiện truy vấn trực tiếp trên <strong>Cơ sở dữ liệu SQL nội bộ</strong> của Đại học Vinh. Quá trình này được bảo mật hoàn toàn trong hạ tầng mạng của nhà trường.</li>
+                <li><strong>Gửi dữ liệu cho bên thứ ba:</strong> Chúng tôi chỉ gửi nội dung câu hỏi (Prompt) của bạn tới đối tác AI (<strong>OpenAI</strong>). <strong>KHÔNG CÓ bất kỳ dữ liệu định danh cá nhân (PII) nào</strong> như Họ tên hay Mã sinh viên được gửi kèm lên máy chủ của bên thứ ba.</li>
+                <li><strong>Cam kết bảo vệ (Equal Protection):</strong> Đối tác cung cấp hạ tầng AI cam kết bảo vệ dữ liệu tương đương với các tiêu chuẩn của ứng dụng. Dữ liệu chỉ được dùng để xử lý câu trả lời thời gian thực và không được sử dụng để huấn luyện (train) mô hình AI của bên thứ ba.</li>
+                <li><strong>Sự đồng ý của người dùng:</strong> Bạn có quyền từ chối sử dụng AI. Chúng tôi luôn yêu cầu xác nhận sự đồng ý rõ ràng (Explicit Consent) trước khi tính năng này được kích hoạt lần đầu.</li>
+            </ul>
+        </div>
+
+        <h2>3. Bảo mật sinh trắc học (Face ID)</h2>
+        <p>Ứng dụng tuân thủ các quy định về dữ liệu nhạy cảm:</p>
+        <ul>
+            <li>Dữ liệu khuôn mặt được đối khớp trực tiếp với cơ sở dữ liệu hình ảnh sinh viên đã đăng ký tại nhà trường.</li>
+            <li>Quá trình xác thực diễn ra trên máy chủ nội bộ (Internal Server), không thông qua các dịch vụ đám mây của bên thứ ba.</li>
+            <li>Chúng tôi tuyệt đối không bán hoặc cung cấp dữ liệu sinh trắc học cho bất kỳ tổ chức nào.</li>
+        </ul>
+
+        <h2>4. Chia sẻ dữ liệu</h2>
+        <p>Chúng tôi <strong>KHÔNG</strong> chia sẻ dữ liệu cá nhân của sinh viên với bất kỳ bên thứ ba nào vì mục đích thương mại. Việc chia sẻ dữ liệu chỉ xảy ra khi:</p>
+        <ul>
+            <li>Được sự đồng ý trực tiếp của sinh viên.</li>
+            <li>Yêu cầu pháp lý từ cơ quan nhà nước có thẩm quyền.</li>
+            <li>Các đối tác kỹ thuật hạ tầng (như Google Firebase cho thông báo đẩy) đã cam kết bảo mật theo tiêu chuẩn quốc tế.</li>
+        </ul>
+
+        <h2>5. Quyền lợi của bạn</h2>
+        <p>Bạn có toàn quyền:</p>
+        <ul>
+            <li>Truy cập và xem lại toàn bộ dữ liệu cá nhân đang được lưu trữ.</li>
+            <li>Yêu cầu ngừng sử dụng hoặc xóa bỏ FCM Token (thông báo) trong cài đặt ứng dụng.</li>
+            <li>Yêu cầu giải đáp về cách thức xử lý dữ liệu thông qua bộ phận hỗ trợ kỹ thuật.</li>
+        </ul>
+
+        <div class="footer">
+            <h2>7. Thông tin liên hệ</h2>
+            <p>Nếu bạn có bất kỳ câu hỏi nào về chính sách này, vui lòng liên hệ với chúng tôi:</p>
+            <p>
+                <strong>Trung tâm Công nghệ Thông tin Viện Nghiên cứu và Đào tạo trực tuyến- Trường Đại học Vinh</strong><br>
+                Địa chỉ: 182 Lê Duẩn, Thành phố Vinh, Nghệ An, Việt Nam.<br>
+                Email: itc@vinhuni.edu.vn<br>
+                Hotline: (0238) 3855.452<br>
+                Website: <a href="https://vinhuni.edu.vn" target="_blank">https://vinhuni.edu.vn</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

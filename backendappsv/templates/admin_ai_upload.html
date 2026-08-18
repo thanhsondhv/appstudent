@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản lý Tri thức AI - Vinh Uni</title>
+    <script src="https://cdn.tailwindcss.com"></script> 
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root { --vinhuni-blue: #0056b3; }
+        .bg-vinhuni { background-color: var(--vinhuni-blue); }
+        .text-vinhuni { color: var(--vinhuni-blue); }
+        .border-vinhuni { border-color: var(--vinhuni-blue); }
+        #drop-zone.dragover { background-color: #ebf4ff; border-color: #3182ce; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+
+    <nav class="bg-vinhuni text-white p-4 shadow-lg">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold"><i class="fas fa-brain mr-2"></i> Hệ thống Huấn luyện AI</h1>
+            <a href="/mobile/" class="text-sm opacity-80 hover:opacity-100">Quay lại Dashboard</a>
+        </div>
+    </nav>
+
+    <div class="container mx-auto mt-10 px-4 max-w-2xl">
+        <div class="bg-white rounded-2xl shadow-xl p-8">
+            <h2 class="text-2xl font-extrabold text-gray-800 mb-2">Nạp tài liệu quy chế mới</h2>
+            <p class="text-gray-500 mb-8">Hệ thống sẽ tự động đọc, cắt nhỏ và tạo vector từ file DOCX/PDF để Chatbot học kiến thức.</p>
+
+            <div id="drop-zone" class="border-2 border-dashed border-gray-300 rounded-xl p-10 flex flex-col items-center justify-center transition-all cursor-pointer hover:border-vinhuni">
+                <i class="fas fa-file-alt text-5xl text-gray-300 mb-4" id="upload-icon"></i>
+                <p id="file-name" class="text-gray-600 font-medium text-center">Kéo thả file Word (.docx) hoặc PDF vào đây<br><span class="text-sm text-gray-400">hoặc click để chọn file</span></p>
+                <input type="file" id="file-input" class="hidden" accept=".pdf, .docx, application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+            </div>
+
+            <div id="progress-container" class="mt-8 hidden">
+                <div class="flex justify-between mb-2">
+                    <span class="text-sm font-semibold text-vinhuni">Đang tải file lên Server...</span>
+                    <span id="progress-percent" class="text-sm font-bold text-vinhuni">0%</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2.5">
+                    <div id="progress-bar" class="bg-vinhuni h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <p class="text-xs text-gray-500 mt-2 italic text-center">Tiến trình nhúng Vector sẽ chạy ngầm sau khi tải xong.</p>
+            </div>
+
+            <button id="upload-btn" class="w-full mt-8 bg-vinhuni text-white font-bold py-4 rounded-xl shadow-lg hover:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all" disabled>
+                BẮT ĐẦU HUẤN LUYỆN AI
+            </button>
+
+            <div id="result-msg" class="mt-6 p-4 rounded-lg hidden"></div>
+        </div>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const fileName = document.getElementById('file-name');
+        const uploadBtn = document.getElementById('upload-btn');
+        const resultMsg = document.getElementById('result-msg');
+        let selectedFile = null;
+
+        // Xử lý sự kiện kéo thả và chọn file
+        dropZone.onclick = () => fileInput.click();
+        fileInput.onchange = (e) => handleFile(e.target.files[0]);
+
+        dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('dragover'); };
+        dropZone.ondragleave = () => dropZone.classList.remove('dragover');
+        dropZone.ondrop = (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            handleFile(e.dataTransfer.files[0]);
+        };
+
+        function handleFile(file) {
+            if (file) {
+                const fileNameLower = file.name.toLowerCase();
+                const isPDF = fileNameLower.endsWith('.pdf') || file.type === "application/pdf";
+                const isDOCX = fileNameLower.endsWith('.docx') || file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+                if (isPDF || isDOCX) {
+                    selectedFile = file;
+                    fileName.innerHTML = `<span class="text-vinhuni font-bold">${file.name}</span> (${(file.size/1024/1024).toFixed(2)} MB)`;
+                    
+                    // Thay đổi Icon tùy theo loại file
+                    const iconObj = document.getElementById('upload-icon');
+                    if (isDOCX) {
+                        iconObj.className = "fas fa-file-word text-5xl text-blue-500 mb-4";
+                    } else {
+                        iconObj.className = "fas fa-file-pdf text-5xl text-red-500 mb-4";
+                    }
+
+                    uploadBtn.disabled = false;
+                } else {
+                    alert("Hệ thống hiện tại chỉ hỗ trợ định dạng Word (.docx) hoặc PDF!");
+                }
+            }
+        }
+
+        // Xử lý Upload lên Server
+        uploadBtn.onclick = async () => {
+            if (!selectedFile) return;
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+
+            uploadBtn.disabled = true;
+            document.getElementById('progress-container').classList.remove('hidden');
+            resultMsg.classList.add('hidden');
+
+            try {
+                // Giả lập thanh tiến trình upload tải file
+                let progress = 0;
+                const interval = setInterval(() => {
+                    progress += 10;
+                    if(progress <= 90) updateProgress(progress);
+                }, 200);
+
+                // Kiểm tra loại file để gọi đúng API endpoint
+                const isDOCX = selectedFile.name.toLowerCase().endsWith('.docx');
+                const apiEndpoint = isDOCX ? '/api/ai-docs/upload-docx' : '/api/ai-docs/upload-pdf';
+
+                const response = await fetch(apiEndpoint, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                clearInterval(interval);
+                const data = await response.json();
+
+                if (response.ok) {
+                    updateProgress(100);
+                    // Hiển thị thông báo (Server trả về câu báo Đang xử lý ngầm)
+                    showResult("✅ " + data.message, "bg-green-100", "text-green-800");
+                } else {
+                    showResult("❌ Lỗi: " + data.detail, "bg-red-100", "text-red-700");
+                }
+            } catch (err) {
+                showResult("💥 Lỗi kết nối server! Hãy kiểm tra xem API đã chạy chưa.", "bg-red-100", "text-red-700");
+            } finally {
+                uploadBtn.disabled = false;
+            }
+        };
+
+        function updateProgress(val) {
+            document.getElementById('progress-bar').style.width = val + '%';
+            document.getElementById('progress-percent').innerText = val + '%';
+        }
+
+        function showResult(text, bg, textCol) {
+            resultMsg.className = `mt-6 p-4 rounded-lg ${bg} ${textCol} font-medium text-center shadow-inner`;
+            resultMsg.innerText = text;
+            resultMsg.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>

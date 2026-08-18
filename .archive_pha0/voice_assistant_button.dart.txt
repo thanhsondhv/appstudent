@@ -1,0 +1,16 @@
+// lib/views/widgets/voice_assistant_button.dart
+// Trong hàm xử lý sau khi dừng ghi âm:
+final result = await _voiceService.stopAndExecute();
+
+if (result != null && result['status'] == 'success') {
+  String route = result['target_route'];
+  String message = result['message'];
+
+  // 🔊 Thông báo cho người dùng
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("🎙️ $message")));
+
+  // 🚀 ĐIỀU HƯỚNG TỰ ĐỘNG
+  if (route.isNotEmpty) {
+    Navigator.pushNamed(context, route); 
+  }
+}

@@ -1,8 +1,7 @@
 //congcanbo.dart
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:webview_flutter/webview_flutter.dart';
+import '../core/api/api.dart';
 
 class XepLoaiScreen extends StatefulWidget {
   final String hsid;
@@ -50,12 +49,13 @@ class _XepLoaiScreenState extends State<XepLoaiScreen> {
   Future<void> _fetchTokenAndLoadWeb() async {
     try {
       // 1. Lấy Token dựa trên hsid động
-      final response = await http.get(
-        Uri.parse('https://mobi.vinhuni.edu.vn/api/get-token?hsid=${widget.hsid}'),
+      final response = await Api.get(
+        '/api/get-token',
+        thamSo: {'hsid': widget.hsid},
       );
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+      if (response.thanhCong) {
+        final data = response.data is Map ? response.data as Map : const {};
 
         if (data['token'] != null) {
           final String token = data['token'];

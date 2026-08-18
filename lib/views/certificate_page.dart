@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import '../core/api/api.dart';
 
 class CertificatePage extends StatefulWidget {
   final String studentId;
@@ -12,7 +11,6 @@ class CertificatePage extends StatefulWidget {
 }
 
 class _CertificatePageState extends State<CertificatePage> {
-  final String apiUrl = "https://mobi.vinhuni.edu.vn/api/certificate";
   List certList = [];
   bool isLoading = true;
 
@@ -26,16 +24,20 @@ class _CertificatePageState extends State<CertificatePage> {
     if (!mounted) return;
     setState(() => isLoading = true);
     try {
-      final response = await http.get(Uri.parse(
-          "$apiUrl/student/${widget.studentId}?type_id=ALL"));
-      
-      if (response.statusCode == 200) {
+      final response = await Api.get(
+        "/api/certificate/student/${widget.studentId}",
+        thamSo: {"type_id": "ALL"},
+      );
+
+      if (response.thanhCong) {
         if (mounted) {
           setState(() {
-            certList = json.decode(response.body) ?? [];
+            certList = response.data is List ? response.data as List : const [];
             isLoading = false;
           });
         }
+      } else if (mounted) {
+        setState(() => isLoading = false);
       }
     } catch (e) {
       if (mounted) {

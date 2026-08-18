@@ -43,3 +43,73 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# ==========================================================
+# BẢO MẬT — KHÔNG BAO GIỜ ĐƯA CÁC TỆP SAU VÀO GIT
+# Thêm ngày 18/08/2026 (Pha 0 — chặn rò rỉ khoá bí mật)
+# ==========================================================
+
+# Biến môi trường và cấu hình chứa khoá
+.env
+.env.*
+!.env.example
+**/appsettings.json
+**/appsettings.*.json
+
+# Khoá dịch vụ Firebase / Google (quyền quản trị toàn hệ thống)
+**/*firebase-adminsdk*.json
+**/serviceAccountKey.json
+**/GoogleService-Info.plist
+**/google-services.json
+
+# Chứng thư số, khoá riêng, chứng chỉ ký số
+*.pem
+*.key
+*.pfx
+*.p12
+*.jks
+*.keystore
+*.crt
+*.cer
+
+# Dữ liệu cá nhân người học và cán bộ
+**/students_data.json
+**/*_personal_data.json
+backendappsv/exports/
+backendappsv/vneid_images/
+backendappsv/uploads/
+
+# Bản kết xuất cơ sở dữ liệu
+*.sql.bak
+*.bak
+*.mdf
+*.ldf
+
+# ==========================================================
+# RÁC / BẢN SAO LƯU — không thuộc mã nguồn
+# ==========================================================
+untitled folder/
+lib.zip
+**/*.zip
+build/
+backendappsv/__pycache__/
+**/__pycache__/
+*.pyc
+.DS_Store
+**/.DS_Store
+devtools_options.yaml
+
+# ==========================================================
+# Sản phẩm dựng và tài liệu kèm theo trong backendappsv
+# Không phải mã nguồn — chiếm 48/52 MB nếu để lọt vào git
+# ==========================================================
+backendappsv/web/
+backendappsv/drivers/
+backendappsv/_luu_tru/
+backendappsv/logs/
+backendappsv/signed_documents/
+backendappsv/vneid_images/
+backendappsv/functions/node_modules/
+backendappsv/functions/package-lock.json
+backendappsv/**/*.wasm
+backendappsv/**/*.js.symbols

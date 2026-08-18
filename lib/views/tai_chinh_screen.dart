@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:intl/intl.dart';
+import '../core/api/api.dart';
 
 class TaiChinhScreen extends StatefulWidget {
   const TaiChinhScreen({super.key});
@@ -38,16 +37,19 @@ class _TaiChinhScreenState extends State<TaiChinhScreen> with SingleTickerProvid
         return;
       }
 
-      final url = 'https://mobi.vinhuni.edu.vn/api/finance/$userId';
-      final response = await http.get(Uri.parse(url));
+      final response = await Api.get('/api/finance/$userId');
+      if (!mounted) return;
 
-      if (response.statusCode == 200) {
+      if (response.thanhCong) {
         setState(() {
-          financeData = json.decode(response.body);
+          financeData = response.data;
           isLoading = false;
         });
       } else {
-        setState(() { errorMessage = "Không thể tải dữ liệu"; isLoading = false; });
+        setState(() {
+          errorMessage = response.thongDiepLoi;
+          isLoading = false;
+        });
       }
     } catch (e) {
       setState(() { errorMessage = "Lỗi kết nối máy chủ"; isLoading = false; });

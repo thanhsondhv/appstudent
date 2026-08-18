@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../core/api/api.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -63,20 +62,22 @@ class _SearchScreenState extends State<SearchScreen> {
     try {
       // ⚠️ ĐÂY LÀ NƠI BẠN GỌI API THẬT TRÊN FASTAPI
       // Ví dụ gọi 2 API song song để tăng tốc độ:
-      var subjectRes = http.get(Uri.parse('https://mobi.vinhuni.edu.vn/api/search-subject?student_id=$_studentId&keyword=$keyword'));
-      var notifRes = http.get(Uri.parse('https://mobi.vinhuni.edu.vn/api/search-notification?student_id=$_studentId&keyword=$keyword'));
-
-      var responses = await Future.wait([subjectRes, notifRes]).timeout(const Duration(seconds: 15));
+      // Gọi song song hai API để rút ngắn thời gian chờ
+      final thamSo = {'student_id': _studentId, 'keyword': keyword};
+      final responses = await Future.wait([
+        Api.get('/api/search-subject', thamSo: thamSo, hanCho: const Duration(seconds: 15)),
+        Api.get('/api/search-notification', thamSo: thamSo, hanCho: const Duration(seconds: 15)),
+      ]);
 
       if (mounted) {
         setState(() {
           // Xử lý kết quả Môn học
-          if (responses[0].statusCode == 200) {
-            _subjectResults = json.decode(utf8.decode(responses[0].bodyBytes))['results'] ?? [];
+          if (responses[0].thanhCong && responses[0].data is Map) {
+            _subjectResults = (responses[0].data as Map)['results'] ?? [];
           }
           // Xử lý kết quả Thông báo
-          if (responses[1].statusCode == 200) {
-            _notificationResults = json.decode(utf8.decode(responses[1].bodyBytes))['results'] ?? [];
+          if (responses[1].thanhCong && responses[1].data is Map) {
+            _notificationResults = (responses[1].data as Map)['results'] ?? [];
           }
           _isLoading = false;
         });

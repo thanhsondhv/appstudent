@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'thong_ke_chi_tiet_screen.dart';
+import '../../core/api/api.dart';
 class NotificationHistoryScreen extends StatefulWidget {
   const NotificationHistoryScreen({super.key});
   @override
@@ -40,15 +39,18 @@ class _NotificationHistoryScreenState extends State<NotificationHistoryScreen> w
     }
 
     // 2. Gọi API lấy lịch sử
-    final response = await http.get(
-      Uri.parse("https://mobi.vinhuni.edu.vn/api/lecturer/sent-history/$id"),
-    ).timeout(const Duration(seconds: 15)); // Thêm timeout để tránh chờ quá lâu
+    final response = await Api.get(
+      "/api/lecturer/sent-history/$id",
+      hanCho: const Duration(seconds: 15),
+    );
 
     // 3. Kiểm tra xem Widget còn trên màn hình không trước khi setState
     if (!mounted) return;
 
-    if (response.statusCode == 200) {
-      final Map<String, dynamic> responseData = jsonDecode(response.body);
+    if (response.thanhCong) {
+      final Map<String, dynamic> responseData = response.data is Map
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
       
       if (responseData['status'] == 'success') {
         setState(() {
@@ -317,11 +319,11 @@ class _ThongKeChiTietScreenState extends State<ThongKeChiTietScreen> {
 
   Future<void> _fetch() async {
     try {
-      final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/lecturer/notification-report/${widget.queueId}"));
-      
-      if (!mounted) return; 
+      final res = await Api.get("/api/lecturer/notification-report/${widget.queueId}");
 
-      if (res.statusCode == 200) {
+      if (!mounted) return;
+
+      if (res.thanhCong) {
         setState(() { 
           _list = jsonDecode(res.body)['data'] ?? []; 
           _displayList = _list;

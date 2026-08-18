@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import '../../core/api/api.dart';
 
 class ThongKeChiTietScreen extends StatefulWidget {
   final int queueId;
@@ -43,13 +42,12 @@ class _ThongKeChiTietScreenState extends State<ThongKeChiTietScreen> {
 
   Future<void> _fetchDetails() async {
     try {
-      final res = await http.get(Uri.parse(
-          "https://mobi.vinhuni.edu.vn/api/lecturer/notification-report/${widget.queueId}"));
-      
+      final res = await Api.get("/api/lecturer/notification-report/${widget.queueId}");
+
       if (!mounted) return;
 
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body)['data'] ?? [];
+      if (res.thanhCong) {
+        final data = (res.data is Map ? res.data['data'] : null) ?? [];
         setState(() {
           _list = data;
           _displayList = _list;

@@ -1,0 +1,230 @@
+C:\vinhuni_app\ (Thư mục gốc của bạn)
+├── Main.py                     # File chạy chính của App Student
+├── templates/                  # Chứa login.html, schedule.html...
+├── web/                        # Chứa bản build Flutter Web
+│
+└── vinhuni_chatbot_python/     # <-- Thư mục CON chứa Chatbot
+    ├── __init__.py             # File trống để Python nhận diện đây là module
+    ├── main_chatbot.py         # Router chứa các endpoint /chat
+    ├── models.py               # Định nghĩa ChatRequest, ChatResponse
+    └── services/               # Chứa logic xử lý
+        ├── ai_service.py       # OpenAI logic
+        └── db_service.py       # SQL Server logic
+		
+Để tích hợp hệ thống Chatbot từ C# sang Python (FastAPI) cho đối tượng là sinh viên và học viên Đại học Vinh, chúng ta sẽ xây dựng module vinhuni_chatbot_python ngay trong dự án hiện tại của bạn. Module này sẽ tận dụng cơ sở dữ liệu VinhUni_Local và các phiên đăng nhập (session) đã có.
+
+Dưới đây là cấu trúc và mã nguồn chi tiết để bạn triển khai.
+
+🗄️ 1. SQL Script Khởi tạo (Cập nhật cho SQL Server)
+Bạn cần chạy script này trong SQL Server AI2025\\SQLEXPRESS02 để tạo các bảng lưu trữ tri thức và hội thoại.
+
+SQL
+-- 1. Lưu trữ tri thức (RAG)
+CREATE TABLE DocumentChunks (
+    ChunkId INT PRIMARY KEY IDENTITY(1,1),
+    DocumentName NVARCHAR(255),
+    ChunkIndex INT,
+    Content NVARCHAR(MAX),
+    VectorJson NVARCHAR(MAX) -- Lưu mảng float của OpenAI dưới dạng JSON string
+);
+
+-- 2. Quản lý phiên hội thoại
+CREATE TABLE ChatSessions (
+    Id INT PRIMARY KEY IDENTITY(1,1),
+    StudentId NVARCHAR(50), -- Liên kết với mã sinh viên từ app student
+    StartTime DATETIME DEFAULT GETDATE(),
+    Summary NVARCHAR(MAX)
+);
+
+-- 3. Lưu nhật ký tin nhắn
+CREATE TABLE ChatLogs (
+    Id INT PRIMARY KEY IDENTITY(1,1),
+    SessionId INT REFERENCES ChatSessions(Id),
+    [Role] NVARCHAR(20), -- 'user' hoặc 'assistant'
+    Content NVARCHAR(MAX),
+    Timestamp DATETIME DEFAULT GETDATE()
+);
+🐍 2. Mã nguồn Module Chatbot (Python)
+📄 vinhuni_chatbot_python/models.py
+Định nghĩa các kiểu dữ liệu cho API dựa trên ChatRequest.cs và LeadInfo.cs.
+
+Python
+from pydantic import BaseModel
+from typing import Optional, List
+
+class ChatRequest(BaseModel):
+    message: str
+    sessionId: Optional[int] = 0
+
+class ChatResponse(BaseModel):
+    mainReply: str
+    suggestions: List[str]
+    sessionId: int
+📄 vinhuni_chatbot_python/services/ai_service.py
+Chuyển đổi logic xử lý từ OpenAIService.cs.
+
+Python
+import openai
+import json
+
+class AIService:
+    def __init__(self, api_key: str, model: str):
+        self.client = openai.OpenAI(api_key=api_key)
+        self.model = model
+
+    def get_embedding(self, text: str):
+        # Tương đương GetEmbeddingAsync trong C#
+        response = self.client.embeddings.create(
+            input=text,
+            model="text-embedding-3-small"
+        )
+        return response.data[0].embedding
+
+    def get_chat_response(self, messages: list):
+        # Tương đương ChatAsync trong C#
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=0.3
+        )
+        return response.choices[0].message.content
+📄 vinhuni_chatbot_python/services/db_service.py
+Chuyển đổi logic từ VectorStoreService.cs và ChatLogService.cs sử dụng pyodbc.
+
+Python
+import pyodbc
+import json
+import numpy as np
+
+class DBService:
+    def __init__(self, conn_str: str):
+        self.conn_str = conn_str
+
+    def _get_conn(self):
+        return pyodbc.connect(self.conn_str)
+
+    def get_relevant_chunks(self, query_vector: list, top_k: int = 3):
+        conn = self._get_conn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT Content, VectorJson FROM DocumentChunks")
+        
+        all_chunks = cursor.fetchall()
+        conn.close()
+
+        results = []
+        for content, v_json in all_chunks:
+            v_array = np.array(json.loads(v_json))
+            # Tính Cosine Similarity tương đương C#
+            score = np.dot(query_vector, v_array) / (np.linalg.norm(query_vector) * np.linalg.norm(v_array))
+            if score > 0.75: # Ngưỡng tin cậy trong C#
+                results.append((content, score))
+        
+        return sorted(results, key=lambda x: x[1], reverse=True)[:top_k]
+
+    def create_session(self, student_id: str):
+        conn = self._get_conn()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO ChatSessions (StudentId) OUTPUT INSERTED.Id VALUES (?)", (student_id,))
+        new_id = cursor.fetchone()[0]
+        conn.commit()
+        return new_id
+📄 vinhuni_chatbot_python/main_chatbot.py
+Router chính tích hợp logic từ ChatEndpoints.cs.
+
+Python
+from fastapi import APIRouter, Request, HTTPException
+from .models import ChatRequest, ChatResponse
+from .services.ai_service import AIService
+from .services.db_service import DBService
+import os
+
+router = APIRouter(prefix="/api/chatbot")
+
+# Khởi tạo Services (Nạp từ biến môi trường hoặc config tương đương appsettings.json)
+ai_service = AIService(api_key="sk-...", model="gpt-4o-mini")
+db_service = DBService(conn_str="DRIVER={ODBC Driver 17 for SQL Server};SERVER=AI2025\\SQLEXPRESS02;DATABASE=VinhUni_Local;UID=sa;PWD=<MAT_KHAU_XEM_TRONG_.env>;")
+
+@router.post("/chat", response_model=ChatResponse)
+async def chat(request: Request, chat_req: ChatRequest):
+    # 1. Lấy thông tin sinh viên từ Session hiện có
+    student_id = request.session.get("user_id")
+    if not student_id:
+        raise HTTPException(status_code=401, detail="Vui lòng đăng nhập")
+
+    # 2. Quản lý Session ID
+    session_id = chat_req.sessionId
+    if session_id == 0:
+        session_id = db_service.create_session(student_id)
+
+    # 3. RAG: Lấy ngữ cảnh tri thức (Lịch học, học phí, quy chế...)
+    query_vec = ai_service.get_embedding(chat_req.message)
+    relevant_context = db_service.get_relevant_chunks(query_vec)
+    context_text = "\n".join([c[0] for c in relevant_context])
+
+    # 4. Tạo phản hồi AI
+    system_prompt = f"Bạn là trợ lý ảo hỗ trợ sinh viên Đại học Vinh. Sử dụng ngữ cảnh: {context_text}"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": chat_req.message}
+    ]
+    
+    reply = ai_service.get_chat_response(messages)
+    
+    return {
+        "mainReply": reply,
+        "suggestions": ["Lịch thi của mình?", "Xem bảng điểm", "Hỏi về học phí"],
+        "sessionId": session_id
+    }
+🔗 3. Cách tích hợp vào dự án vinhuni_project (Main.py)
+Trong file Main.py hiện tại của bạn, hãy thêm các dòng sau để "gắn" module chatbot vào:
+
+Python
+# Import router từ module mới
+from vinhuni_chatbot_python.main_chatbot import router as chatbot_router
+
+# ... các phần khởi tạo app cũ ...
+
+# Gắn module chatbot vào hệ thống chung
+app.include_router(chatbot_router)
+
+# Bây giờ Flutter có thể gọi đến: https://mobi.vinhuni.edu.vn/api/chatbot/chat
+
+
+trong MAIN.dart
+📄 2. Cập nhật file lib/main.dart
+Bây giờ bạn chỉ cần nạp file vừa tạo vào và gọi ra ở phần giao diện chính.
+
+Thêm lệnh Import ở đầu file:
+
+Dart
+import 'chat_screen.dart'; // Nạp màn hình Hỏi đáp vừa tách
+Sửa phần danh sách tiêu đề (_titles):
+
+Dart
+final List<String> _titles = ["Thông báo", "Lịch học", "Lịch thi", "Bảng điểm", "Hỏi đáp AI"];
+Cập nhật BottomNavigationBar (Thêm icon thứ 5):
+
+Dart
+items: const [
+  BottomNavigationBarItem(icon: Icon(Icons.notifications), label: "Thông báo"),
+  BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: "Lịch học"),
+  BottomNavigationBarItem(icon: Icon(Icons.edit_note), label: "Lịch thi"),
+  BottomNavigationBarItem(icon: Icon(Icons.grade), label: "Điểm"),
+  BottomNavigationBarItem(icon: Icon(Icons.psychology), label: "Hỏi đáp"), // Icon cho AI
+],
+Cập nhật body của Scaffold:
+
+Dart
+body: Column(
+  children: [
+    // Chỉ hiện Filter Bar khi ở các tab Lịch học, Lịch thi, Điểm
+    if (_currentIndex > 0 && _currentIndex < 4) _buildFilterBar(), 
+    Expanded(
+      child: _currentIndex == 4 
+        ? ChatScreen(studentId: studentId!) // Hiển thị màn hình AI
+        : FutureBuilder<List<dynamic>>(
+            // ... logic lấy dữ liệu cũ giữ nguyên ...
+          ),
+    ),
+  ],
+),

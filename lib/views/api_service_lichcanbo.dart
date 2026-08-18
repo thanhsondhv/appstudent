@@ -1,11 +1,11 @@
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'schedule_canbo.dart';
+import '../core/api/api.dart';
 
 class ApiServiceLichCanbo {
   // URL sản xuất Sơn cung cấp
-  static const String baseUrl = "https://mobi.vinhuni.edu.vn/api/admin/schedule";
+  static const String baseUrl = "/api/admin/schedule";
   
   // Khóa định danh để lưu trữ dữ liệu vào bộ nhớ máy
   static const String _cacheKey = "cache_weekly_schedule";
@@ -16,10 +16,12 @@ class ApiServiceLichCanbo {
     
     try {
       // 1. Gửi yêu cầu lấy dữ liệu mới nhất từ Server
-      final response = await http.get(Uri.parse('$baseUrl/view-data'))
-          .timeout(const Duration(seconds: 10));
+      final response = await Api.get(
+        '$baseUrl/view-data',
+        hanCho: const Duration(seconds: 10),
+      );
 
-      if (response.statusCode == 200) {
+      if (response.thanhCong) {
         final String rawBody = response.body;
         
         // 2. Lưu phản hồi vào bộ nhớ đệm để dùng cho lần sau hoặc khi mất mạng
@@ -46,9 +48,9 @@ class ApiServiceLichCanbo {
   Future<String> syncSchedule(String week) async {
     try {
       // Tham số week nhận giá trị 'current' hoặc 'next'
-      final response = await http.get(Uri.parse('$baseUrl/sync-weekly?week=$week'));
+      final response = await Api.get('$baseUrl/sync-weekly', thamSo: {'week': week});
       
-      if (response.statusCode == 200) {
+      if (response.thanhCong) {
         Map<String, dynamic> data = json.decode(response.body);
         return data['message'] ?? "Đồng bộ thành công";
       } else {

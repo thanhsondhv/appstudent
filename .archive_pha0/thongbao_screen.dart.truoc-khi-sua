@@ -1,0 +1,469 @@
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'chatgroup/chat_room_page.dart';
+import 'chatgroup/chat_group_list_page.dart';
+import 'thongbao_chitiet_screen.dart';
+import '../services/notification_service.dart';
+import '../services/database_helper.dart';
+import '../core/auth/user_role.dart';
+
+
+class ThongBaoScreen extends StatefulWidget {
+  const ThongBaoScreen({super.key});
+
+  @override
+  State<ThongBaoScreen> createState() => _ThongBaoScreenState();
+}
+
+class _ThongBaoScreenState extends State<ThongBaoScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  final Color vinhUniBlue = const Color(0xFF0054A6);
+  
+  // Danh sách tin cho từng Tab
+  List<dynamic> generalNotifs = [];   
+  List<dynamic> workNotifs = [];      
+  List<dynamic> reminderNotifs = [];  
+  List<dynamic> personalNotifs = [];  
+  
+  bool isLoading = true;
+  String userRole = "SinhVien"; 
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 4, vsync: this);
+    _initRoleAndFetch();
+    // 🔥 KHỞI ĐỘNG NHỊP TIM KHI VÀO APP
+ 
+  }
+
+  // --- 1. KHỞI TẠO VÀ LẤY DỮ LIỆU ---
+  Future<void> _initRoleAndFetch() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        userRole = prefs.getString('user_role') ?? "SinhVien";
+      });
+      // Gọi hàm tải dữ liệu chính
+      fetchNotifications();
+    }
+  }
+
+  /// 🔥 HÀM TẢI DỮ LIỆU (TỐI ƯU TỐC ĐỘ: HIỆN OFFLINE TRƯỚC)
+  Future<void> fetchNotifications() async {
+    if (!mounted) return;
+    
+    final prefs = await SharedPreferences.getInstance();
+    final String? currentUserId = prefs.getString('user_code');
+    if (currentUserId == null) return;
+
+    // ⚡ BƯỚC A: Lấy dữ liệu từ SQLite (Instant - hiện ngay trong 0.1s)
+    final localData = await DatabaseHelper.instance.getOfflineNotifs(currentUserId);
+    if (mounted && localData.isNotEmpty) {
+      _updateGroups(localData); // Chia tin vào các tab
+      setState(() => isLoading = false); // Tắt loading ngay vì đã có tin cũ để xem
+    }
+
+    // 🌐 BƯỚC B: Chạy ngầm việc tải từ Server (Không bắt người dùng đợi)
+    NotificationService.fetchAndSyncNotifs(currentUserId).then((newData) {
+      if (mounted && newData.isNotEmpty) {
+        _updateGroups(newData); // Cập nhật lại danh sách mới nhất
+        setState(() => isLoading = false);
+        
+        // 🔥 Cập nhật con số đỏ ngoài Icon App ngay sau khi đồng bộ xong
+        NotificationService.refreshAppIconBadge();
+      }
+    }).catchError((e) {
+      debugPrint("⚠️ Lỗi đồng bộ thông báo: $e");
+      if (mounted) setState(() => isLoading = false);
+    });
+  }
+
+  // --- 2. QUY HOẠCH TIN NHẮN VÀO TAB (LOGIC CHÍNH) ---
+  void _updateGroups(List<dynamic> data) {
+    final bool isStaff = UserRole.parse(userRole).isStaff;
+
+    setState(() {
+      // 🛡️ Lọc bỏ tin nhắn rác hoặc tin chỉ dùng cho Push
+      final cleanData = data.where((n) {
+        String loai = n['LoaiTin']?.toString().toUpperCase() ?? "";
+        if (loai == 'CHAT_GROUP') return false;
+        if (n['Scope']?.toString().toUpperCase() == 'CHAT_PUSH_ONLY') return false;
+        return true;
+      }).toList();
+
+      // Chia nhóm vào 4 Tab dựa trên TabGroup
+      generalNotifs = cleanData.where((n) {
+        String loai = n['LoaiTin']?.toString().toUpperCase() ?? "";
+        if (isStaff && (loai == 'THONG_BAO' || loai.contains('VAN_BAN'))) return false;
+        return _safeGetTabGroup(n) == 'GENERAL';
+      }).toList();
+
+      workNotifs = cleanData.where((n) => _safeGetTabGroup(n) == 'WORK').toList();
+      reminderNotifs = cleanData.where((n) => _safeGetTabGroup(n) == 'REMINDER').toList();
+      personalNotifs = cleanData.where((n) => _safeGetTabGroup(n) == 'PERSONAL').toList();
+
+      // Tính toán Badge trong App
+      _calculateAndApplyBadges();
+    });
+  }
+
+  String _safeGetTabGroup(dynamic n) {
+    if (n['TabGroup'] != null && n['TabGroup'].toString().isNotEmpty) {
+      return n['TabGroup'].toString().toUpperCase();
+    }
+    String loai = n['LoaiTin']?.toString().toUpperCase() ?? "";
+    if (['GENERAL', 'THONG_BAO', 'TIN_TUC', 'TIN_TRUONG'].contains(loai)) return 'GENERAL';
+    if (['LICH_TUAN', 'LICH_CONGTAC', 'LICH_HOC', 'DIEM', 'WORK'].contains(loai)) return 'WORK';
+    if (['CANH_BAO', 'LICH_THI', 'LICH_HOP', 'HUY_LICH', 'REMINDER'].contains(loai)) return 'REMINDER';
+    return 'PERSONAL';
+  }
+
+  // --- 3. QUẢN LÝ BADGE TRONG APP ---
+  Future<void> _calculateAndApplyBadges() async {
+    int total = _getTotalUnread();
+    
+    // Cập nhật Badge ngoài Icon App (Nếu cần đồng bộ ngay)
+    NotificationService.refreshAppIconBadge();
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('unread_notif_count', total);
+    
+    if (NotificationService.onRefreshBadge != null) {
+      NotificationService.onRefreshBadge!();
+    }
+  }
+
+  int _getTotalUnread() {
+    return _countUnreadInList(generalNotifs) +
+           _countUnreadInList(workNotifs) +
+           _countUnreadInList(reminderNotifs) +
+           _countUnreadInList(personalNotifs);
+  }
+
+  int _countUnreadInList(List<dynamic> list) {
+    return list.where((n) {
+      var isRead = n['IsRead'].toString(); 
+      return isRead == 'false' || isRead == '0' || isRead == 'null';
+    }).length;
+  }
+
+  // --- 4. GIAO DIỆN (UI COMPONENTS) ---
+  List<String> _getTabLabels() {
+    final bool isStaff = UserRole.parse(userRole).isStaff;
+    return [
+      "VINHUNI", 
+      isStaff ? "CÔNG TÁC" : "HỌC TẬP", 
+      "NHẮC LỊCH", 
+      "CÁ NHÂN"
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = _getTabLabels();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8F9FA),
+      appBar: AppBar(
+        // 🔥 Ẩn nút Back tự động
+        automaticallyImplyLeading: false, 
+        title: const Text(
+          "Thông báo", 
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.black87)
+        ),
+        backgroundColor: Colors.white,
+        centerTitle: false,
+        elevation: 0.5,
+        actions: [
+          IconButton(
+            icon: Icon(Icons.done_all_rounded, color: vinhUniBlue, size: 22),
+            onPressed: _showMarkAllReadConfirm,
+            tooltip: "Đánh dấu tất cả đã đọc",
+          ),
+          const SizedBox(width: 8),
+        ],
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: vinhUniBlue,
+          unselectedLabelColor: Colors.grey.shade500,
+          indicatorColor: vinhUniBlue,
+          indicatorWeight: 3,
+          labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10),
+          tabs: [
+            _buildTabWithBadge(labels[0], generalNotifs),
+            _buildTabWithBadge(labels[1], workNotifs),
+            _buildTabWithBadge(labels[2], reminderNotifs),
+            _buildTabWithBadge(labels[3], personalNotifs),
+          ],
+        ),
+      ),
+      body: isLoading
+          ? Center(child: CircularProgressIndicator(color: vinhUniBlue))
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                _buildList(generalNotifs, "Không có tin mới từ VinhUni"),
+                _buildList(workNotifs, UserRole.parse(userRole).isStudent ? "Chưa có lịch học mới" : "Chưa có lịch công tác"),
+                _buildList(reminderNotifs, "Không có nhắc nhở lịch trình"),
+                _buildList(personalNotifs, "Hộp thư cá nhân trống"),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildTabWithBadge(String label, List<dynamic> list) {
+    int unreadCount = _countUnreadInList(list);
+    return Tab(
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Text(label),
+          if (unreadCount > 0)
+            Positioned(
+              right: -16, top: -8,
+              child: Container(
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  color: Colors.red, shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.5)
+                ),
+                constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                child: Center(
+                  child: Text(unreadCount > 99 ? '99' : '$unreadCount', 
+                    style: const TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildList(List<dynamic> list, String emptyMsg) {
+    if (list.isEmpty) return _buildEmptyState(emptyMsg);
+    return RefreshIndicator(
+      onRefresh: fetchNotifications,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        itemCount: list.length,
+        itemBuilder: (context, index) => _buildNotificationCard(list[index]),
+      ),
+    );
+  }
+
+  Widget _buildNotificationCard(dynamic notif) {
+    bool isRead = (notif['IsRead'] == true || notif['IsRead'] == 1);
+    String loai = notif['LoaiTin']?.toString().toUpperCase() ?? "PERSONAL";
+    
+    IconData icon;
+    Color color;
+    switch (loai) {
+      case 'VAN_BAN': icon = Icons.description_outlined; color = Colors.indigo; break;
+      case 'LICH_TUAN': icon = Icons.event_note_outlined; color = Colors.blue; break;
+      case 'LICH_THI': icon = Icons.assignment_outlined; color = Colors.red; break;
+      case 'CANH_BAO': icon = Icons.report_problem_outlined; color = Colors.orange; break;
+      case 'LOP_HP': icon = Icons.school_outlined; color = Colors.green; break;
+      default: icon = Icons.notifications_none_outlined; color = Colors.blueGrey;
+    }
+
+    return GestureDetector(
+      // thongbao_screen.dart
+
+// lib/views/thongbao_screen.dart
+
+onTap: () async {
+        String loai = notif['LoaiTin']?.toString().toUpperCase() ?? "";
+        
+        // ========================================================
+        // 1. XỬ LÝ NẾU LÀ THÔNG BÁO TỪ NHÓM CHAT
+        // ========================================================
+        if (loai == 'CHAT' || loai == 'CHAT_GROUP') {
+          final prefs = await SharedPreferences.getInstance();
+          String uCode = prefs.getString('user_code') ?? "";
+
+          if (mounted && uCode.isNotEmpty) {
+            String specificGid = notif['Scope']?.toString() ?? 
+                                 notif['GroupId']?.toString() ?? 
+                                 notif['RoomID']?.toString() ?? "";
+
+            if (specificGid.isEmpty && notif['Summary'] != null) {
+              String summary = notif['Summary'].toString();
+              if (summary.contains('private_')) specificGid = summary;
+            }
+
+            if (specificGid.isNotEmpty) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => ChatRoomPage(groupId: specificGid, userCode: uCode)),
+              ).then((_) => fetchNotifications());
+            } else {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => ChatGroupListPage(userCode: uCode)),
+              ).then((_) => fetchNotifications());
+            }
+            return; // KẾT THÚC LUỒNG CHAT
+          }
+        }
+        
+        // ========================================================
+        // 2. XỬ LÝ CÁC THÔNG BÁO THƯỜNG (Lịch tuần, Văn bản, Cảnh báo...)
+        // ========================================================
+        try {
+          int notifId = int.parse(notif['ID']?.toString() ?? notif['id']?.toString() ?? '0');
+
+          // A. Cập nhật SQLite nội bộ thành Đã Đọc ngay lập tức
+          DatabaseHelper.instance.updateReadStatus(notifId);
+
+          // B. MỞ MÀN HÌNH CHI TIẾT NGAY LẬP TỨC (Không dùng await để tránh đơ)
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ChiTietThongBaoScreen(notification: notif),
+            ),
+          ).then((_) {
+            // Khi từ màn hình chi tiết quay lại, refresh list để mất dấu chấm đỏ
+            fetchNotifications(); 
+          });
+
+          // C. Bắn API âm thầm báo Server (Chạy nền, không chặn giao diện)
+          // (Lưu ý: Bạn kiểm tra lại đường dẫn API này trong file Python nhé)
+          /* VinhUniClient.instance.post(
+            '/api/mark-read/$notifId', 
+            data: {"student_id": userCode}, // Truyền body nếu API yêu cầu
+          ).catchError((e) => debugPrint("⚠️ Lỗi API báo đọc ngầm: $e"));
+          */
+
+        } catch (e) {
+          debugPrint("❌ Lỗi click thông báo thường: $e");
+        }
+      },
+      onLongPress: () => _showDeleteMenu(notif),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(15),
+        decoration: BoxDecoration(
+          color: isRead ? Colors.white : vinhUniBlue.withOpacity(0.04),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: isRead ? Colors.transparent : vinhUniBlue.withOpacity(0.1)),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 15),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text(loai.replaceAll('_', ' '), style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: color, letterSpacing: 0.5)),
+                    Text(notif['NgayPhatHanh'] ?? "", style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                  ]),
+                  const SizedBox(height: 6),
+                  Text(notif['TieuDe'] ?? "", 
+                    style: TextStyle(fontWeight: isRead ? FontWeight.w500 : FontWeight.bold, fontSize: 14, color: Colors.black87),
+                    maxLines: 2, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 4),
+                  Text(notif['TomTat'] ?? "", style: TextStyle(fontSize: 12, color: Colors.grey.shade600, height: 1.3), maxLines: 2, overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+            if (!isRead) Container(margin: const EdgeInsets.only(top: 25, left: 5), width: 8, height: 8, decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(String msg) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.notifications_off_outlined, size: 60, color: Colors.grey.shade300),
+          const SizedBox(height: 12),
+          Text(msg, style: TextStyle(color: Colors.grey.shade400, fontSize: 14)),
+        ],
+      ),
+    );
+  }
+
+  void _showMarkAllReadConfirm() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Text("Xác nhận", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        content: const Text("Bạn muốn đánh dấu tất cả thông báo là đã đọc?"),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Hủy", style: TextStyle(color: Colors.grey))),
+          TextButton(onPressed: () { Navigator.pop(ctx); }, child: Text("Đồng ý", style: TextStyle(color: vinhUniBlue, fontWeight: FontWeight.bold))),
+        ],
+      ),
+    );
+  }
+
+  
+
+  void _showDeleteMenu(dynamic notif) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10))),
+              ListTile(
+                leading: const Icon(Icons.delete_outline_rounded, color: Colors.red),
+                title: const Text("Xóa thông báo này", style: TextStyle(color: Colors.red, fontWeight: FontWeight.w500)),
+                onTap: () { 
+                  Navigator.pop(context); 
+                  // 🔥 Ép kiểu an toàn và quét cả 'ID' lẫn 'id'
+                  int notifId = int.parse((notif['ID'] ?? notif['id'] ?? 0).toString());
+                  _handleHideNotif(notifId); 
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.close_rounded),
+                title: const Text("Hủy bỏ"),
+                onTap: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleHideNotif(int id) async {
+    try {
+      // 1. Cập nhật trạng thái xuống SQLite
+      await DatabaseHelper.instance.deleteNotificationLocal(id);
+
+      // 2. Xóa trên giao diện (Quét cả ID hoa và id thường)
+      setState(() {
+        generalNotifs.removeWhere((item) => (item['ID'] ?? item['id']) == id);
+        workNotifs.removeWhere((item) => (item['ID'] ?? item['id']) == id);
+        reminderNotifs.removeWhere((item) => (item['ID'] ?? item['id']) == id);
+        personalNotifs.removeWhere((item) => (item['ID'] ?? item['id']) == id);
+      });
+      
+      // 3. Tính lại chấm đỏ Badge
+      _calculateAndApplyBadges();
+      
+    } catch (e) {
+      debugPrint("❌ Lỗi xóa thông báo: $e");
+    }
+  }
+}

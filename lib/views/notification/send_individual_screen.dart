@@ -1,265 +1,318 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'notification_helper.dart';
+import 'notification_helper.dart'; //
+import '../../services/vinhuni_api_client.dart'; //
 
 class SendIndividualScreen extends StatefulWidget {
   const SendIndividualScreen({super.key});
-
   @override
   State<SendIndividualScreen> createState() => _SendIndividualScreenState();
 }
 
 class _SendIndividualScreenState extends State<SendIndividualScreen> {
-  final _titleController = TextEditingController();
-  final _contentController = TextEditingController();
-  final _tempBulkController = TextEditingController(); // Hứng dữ liệu dán dấu phẩy
+  final _messageController = TextEditingController();
+  final _searchController = TextEditingController(); // Controller riêng cho tìm kiếm
+  Timer? _debounce; 
   
-  List<dynamic> _customGroupList = [];
-  String? _selectedCustomGroup;
-  List<Map<String, dynamic>> _verifiedStudents = []; // Danh sách người nhận cuối cùng
-  bool _isLoading = false;
-  String _senderId = "";
+  String _targetRole = "SINHVIEN"; 
+  Map<String, dynamic>? _selectedUser; 
+  Map<String, dynamic>? _replyingTo;   
+  List<dynamic> _chatHistory = []; 
+  bool _isLoading = false, _isHistoryLoading = false;
+  String _senderId = "", _senderName = "";
 
   @override
   void initState() {
     super.initState();
-    _loadSender();
+    _initData();
   }
 
-  Future<void> _loadSender() async {
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _messageController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initData() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() { _senderId = prefs.getString('user_code') ?? ""; });
-    _loadCustomGroups();
+    setState(() {
+      _senderId = prefs.getString('user_code') ?? "";
+      _senderName = prefs.getString('full_name') ?? "Cán bộ";
+    });
   }
 
-  // --- LOGIC NHÓM ẢO ---
-  Future<void> _loadCustomGroups() async {
+  // 🔥 1. HÀM CHỌN NGƯỜI & CLEAR TEXT TÌM KIẾM
+  void _selectUser(String id, String name) {
+    setState(() {
+      _selectedUser = {'id': id, 'name': name};
+      _chatHistory = []; 
+      _replyingTo = null;
+      _searchController.clear(); // 👈 XÓA TRẮNG Ô TÌM KIẾM NGAY KHI CHỌN
+    });
+    FocusScope.of(context).unfocus(); // Đóng bàn phím tìm kiếm
+    _loadHistoryForUser(id);
+  }
+
+  Future<void> _loadHistoryForUser(String targetId) async {
+    if (!mounted) return;
+    setState(() => _isHistoryLoading = true);
     try {
-      final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/lecturer/custom-groups/$_senderId"));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        setState(() { _customGroupList = data['data'] ?? []; });
-      }
-    } catch (e) { debugPrint("Lỗi tải nhóm ảo"); }
-  }
-
-  Future<void> _fetchGroupMembers(String groupId) async {
-    setState(() => _isLoading = true);
-    try {
-      final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/lecturer/custom-group-members/$groupId"));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        for (var sv in data['data']) {
-          _addStudentToVerified(sv['id'].toString(), sv['name'].toString());
-        }
-      }
-    } catch (e) {}
-    setState(() => _isLoading = false);
-  }
-
-  // --- LOGIC TÌM KIẾM & XÁC MINH ---
-  void _addStudentToVerified(String id, String name) {
-    if (!_verifiedStudents.any((e) => e['id'] == id)) {
-      setState(() { _verifiedStudents.add({'id': id, 'name': name}); });
-    }
-  }
-
-  Future<void> _verifyBulk(String input) async {
-    if (input.trim().isEmpty) return;
-    setState(() => _isLoading = true);
-    try {
-      final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/lecturer/check-multiple-users?q=${Uri.encodeComponent(input)}"));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        for (var sv in data['data']) {
-          _addStudentToVerified(sv['id'].toString(), sv['name'].toString());
-        }
-        _tempBulkController.clear();
-        NotificationHelper.showSnack(context, "Đã thêm ${data['data'].length} người vào danh sách", Colors.green);
-      }
-    } catch (e) { NotificationHelper.showSnack(context, "Lỗi kiểm tra danh sách", Colors.red); }
-    setState(() => _isLoading = false);
+      final response = await VinhUniClient.instance.get(
+        "/api/lecturer/chat-history", 
+        queryParameters: {"sender_id": _senderId, "target_id": targetId}
+      );
+      if (mounted) setState(() { _chatHistory = response.data['data'] ?? []; _isHistoryLoading = false; });
+    } catch (e) { if (mounted) setState(() => _isHistoryLoading = false); }
   }
 
   Future<void> _handleSend() async {
-    if (_titleController.text.isEmpty || _contentController.text.isEmpty || _verifiedStudents.isEmpty) {
-      NotificationHelper.showSnack(context, "Vui lòng nhập đủ nội dung và người nhận!", Colors.orange);
-      return;
-    }
+    if (_messageController.text.trim().isEmpty || _selectedUser == null) return;
     setState(() => _isLoading = true);
     try {
+      final msg = _messageController.text.trim();
       final body = {
-        "sender_id": _senderId,
-        "scope": "INDIVIDUAL",
-        "target_id": _verifiedStudents.map((e) => e['id']).join(","),
-        "category": "GENERAL",
-        "title": _titleController.text,
-        "content": _contentController.text,
+        "group_id": "CONV_${[_senderId, _selectedUser!['id']].reduce((a, b) => a.compareTo(b) < 0 ? a : b)}",
+        "sender_code": _senderId,
+        "sender_name": _senderName,
+        "message_content": msg,
+        "target_id": _selectedUser!['id'],
+        "role": _targetRole,
+        "reply_to_id": _replyingTo?['message_id'],
       };
-      final res = await http.post(
-        Uri.parse('https://mobi.vinhuni.edu.vn/api/admin/send-notification-individual'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(body)
-      );
+
+      final res = await VinhUniClient.instance.post('/api/admin/send-notification-individual', data: body);
       if (res.statusCode == 200) {
-        NotificationHelper.showSnack(context, "Gửi thành công!", Colors.green);
-        Navigator.pop(context); // Quay lại portal để xem lịch sử
+        _messageController.clear();
+        setState(() => _replyingTo = null);
+        _loadHistoryForUser(_selectedUser!['id']); 
       }
-    } catch (e) { NotificationHelper.showSnack(context, "Lỗi kết nối", Colors.red); }
-    finally { setState(() => _isLoading = false); }
+    } catch (e) { NotificationHelper.showSnack(context, "Lỗi: $e", Colors.red); }
+    finally { if (mounted) setState(() => _isLoading = false); }
   }
 
   @override
   Widget build(BuildContext context) {
+    const Color vinhUniBlue = Color(0xFF0054A6);
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF1F5F9),
       appBar: AppBar(
-        title: const Text("GỬI CHO CÁ NHÂN", style: TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.bold)),
-        backgroundColor: const Color(0xFF0054A6),
-        leading: IconButton(icon: const Icon(Icons.arrow_back_ios, color: Colors.white), onPressed: () => Navigator.pop(context)),
-      ),
-      body: _isLoading ? const Center(child: CircularProgressIndicator()) : SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        // 🔥 NÚT BACK MÀU TRẮNG
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            _buildSectionTitle("1. Chọn người nhận", Icons.person_add_rounded),
-            
-            // --- NHÓM ẢO ---
-            NotificationHelper.buildLabel("Từ nhóm ảo đã lưu"),
-            NotificationHelper.buildDropdown(
-              hint: "Chọn nhóm của bạn",
-              items: _customGroupList.map((e) => e['id'].toString()).toList(),
-              value: _selectedCustomGroup,
-              onChanged: (v) { setState(() => _selectedCustomGroup = v); _fetchGroupMembers(v!); },
-              displayFunc: (id) => _customGroupList.firstWhere((e) => e['id'].toString() == id)['name'],
+            Text(_selectedUser != null ? _selectedUser!['name'] : "TƯƠNG TÁC CÁ NHÂN", 
+              style: const TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.bold)),
+            if (_selectedUser != null)
+              Text("Đang kết nối với ${_selectedUser!['id']}", style: const TextStyle(fontSize: 10, color: Colors.white70)),
+          ],
+        ),
+        backgroundColor: vinhUniBlue, elevation: 0,
+        centerTitle: true,
+      ),
+      body: Column(children: [
+        _buildSearchArea(), 
+        Expanded(child: _buildChatArea()), 
+        _buildInputArea() 
+      ]),
+    );
+  }
+
+  Widget _buildSearchArea() {
+    return Container(
+      color: const Color(0xFF0054A6), padding: const EdgeInsets.fromLTRB(20, 0, 20, 15),
+      child: Column(children: [
+        _buildRoleTabs(),
+        const SizedBox(height: 10),
+        Autocomplete<UserSearchModel>(
+          displayStringForOption: (o) => "${o.name} (${o.id})",
+          optionsBuilder: (v) async {
+            if (v.text.length < 2) return const Iterable.empty();
+            final Completer<Iterable<UserSearchModel>> completer = Completer();
+            if (_debounce?.isActive ?? false) _debounce!.cancel();
+            _debounce = Timer(const Duration(milliseconds: 500), () async {
+              final results = await _searchUsersApi(v.text);
+              completer.complete(results);
+            });
+            return completer.future;
+          },
+          onSelected: (s) => _selectUser(s.id, s.name),
+          fieldViewBuilder: (ctx, ctrl, focus, onSub) {
+            // Liên kết searchController để có thể clear() từ bên ngoài
+            if (_searchController.text.isEmpty && ctrl.text.isNotEmpty) {
+              // Đồng bộ nếu cần
+            }
+            return TextField(
+              controller: ctrl, focusNode: focus,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+              onChanged: (v) => _searchController.text = v,
+              decoration: InputDecoration(
+                hintText: "Tìm ${_targetRole == 'SINHVIEN' ? 'Sinh viên' : 'Cán bộ'}...",
+                hintStyle: const TextStyle(color: Colors.white60),
+                prefixIcon: const Icon(Icons.search, color: Colors.white),
+                suffixIcon: ctrl.text.isNotEmpty ? IconButton(
+                  icon: const Icon(Icons.cancel, color: Colors.white54, size: 18),
+                  onPressed: () => ctrl.clear(),
+                ) : null,
+                filled: true, fillColor: Colors.white.withOpacity(0.15),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                contentPadding: const EdgeInsets.symmetric(vertical: 0)
+              ),
+            );
+          },
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildRoleTabs() {
+    return Row(children: [
+      _roleTab("SINH VIÊN", "SINHVIEN"), const SizedBox(width: 10), _roleTab("CÁN BỘ", "CANBO"),
+    ]);
+  }
+
+  Widget _roleTab(String label, String value) {
+    bool active = _targetRole == value;
+    return GestureDetector(
+      onTap: () => setState(() { _targetRole = value; _selectedUser = null; _chatHistory = []; }),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 6),
+        decoration: BoxDecoration(color: active ? Colors.white : Colors.white24, borderRadius: BorderRadius.circular(20)),
+        child: Text(label, style: TextStyle(color: active ? const Color(0xFF0054A6) : Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+      ),
+    );
+  }
+
+  // 🔥 2. GIAO DIỆN CHAT BUBBLES CĂN 2 BÊN
+  Widget _buildChatArea() {
+    if (_selectedUser == null) {
+      return Center(child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.forum_outlined, size: 80, color: Colors.blue.withOpacity(0.1)),
+          const Text("Chọn một cuộc hội thoại để bắt đầu", style: TextStyle(color: Colors.grey, fontSize: 13)),
+        ],
+      ));
+    }
+    if (_isHistoryLoading) return const Center(child: CircularProgressIndicator());
+    
+    return ListView.builder(
+      reverse: true, padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 20), 
+      itemCount: _chatHistory.length,
+      itemBuilder: (context, index) {
+        final item = _chatHistory[index];
+        bool isMe = item['sender_code'] == _senderId;
+
+        return Column(
+          crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            // Hiển thị tên người gửi (Căn 2 bên)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Text(isMe ? "Bạn" : (item['sender_name'] ?? "Đối phương"), 
+                style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
             ),
-            
-            const SizedBox(height: 15),
-            
-            // --- TÌM KIẾM CÁ NHÂN / DÁN LIST ---
-            NotificationHelper.buildLabel("Tìm lẻ hoặc dán mã (cách nhau dấu phẩy)"),
-            Row(
-              children: [
-                Expanded(
-                  child: Autocomplete<UserSearchModel>(
-                    displayStringForOption: (o) => "${o.name} (${o.id})",
-                    optionsBuilder: (v) async => v.text.length < 2 ? const Iterable.empty() : await _searchUsersApi(v.text),
-                    onSelected: (s) => _addStudentToVerified(s.id, s.name),
-                    fieldViewBuilder: (ctx, ctrl, focus, onSub) => TextField(
-                      controller: ctrl, focusNode: focus,
-                      onChanged: (v) => _tempBulkController.text = v,
-                      decoration: NotificationHelper.inputDecor("Nhập tên/MSV/Mã CB...", Icons.search),
+            GestureDetector(
+              onLongPress: () => setState(() => _replyingTo = item),
+              child: Align(
+                alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+                  decoration: BoxDecoration(
+                    color: isMe ? const Color(0xFF0054A6) : Colors.white,
+                    borderRadius: BorderRadius.circular(18).copyWith(
+                      bottomRight: isMe ? const Radius.circular(2) : const Radius.circular(18),
+                      bottomLeft: isMe ? const Radius.circular(18) : const Radius.circular(2),
                     ),
+                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 5, offset: const Offset(0, 2))]
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (item['reply_to'] != null)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(color: Colors.black.withOpacity(0.05), borderRadius: BorderRadius.circular(8)),
+                          child: Text("↩️ ${item['reply_to']}", style: TextStyle(fontSize: 10, color: isMe ? Colors.white70 : Colors.black54, fontStyle: FontStyle.italic), maxLines: 2),
+                        ),
+                      Text(item['message_content'] ?? "", 
+                        style: TextStyle(color: isMe ? Colors.white : Colors.black87, fontSize: 14, height: 1.3)),
+                      const SizedBox(height: 4),
+                      Text(item['time'] ?? "", 
+                        style: TextStyle(fontSize: 9, color: isMe ? Colors.white60 : Colors.grey, fontWeight: FontWeight.w300)),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                IconButton(
-                  onPressed: () => _verifyBulk(_tempBulkController.text),
-                  icon: const Icon(Icons.add_task_rounded, color: Colors.blue, size: 32),
-                )
-              ],
-            ),
-
-            // --- DANH SÁCH ĐÃ CHỌN (CHIPS) ---
-            if (_verifiedStudents.isNotEmpty) _buildSelectedList(),
-
-            const Divider(height: 40),
-            _buildSectionTitle("2. Nội dung thông báo", Icons.mail_outline_rounded),
-            TextField(controller: _titleController, decoration: NotificationHelper.inputDecor("Tiêu đề thông báo", Icons.title)),
-            const SizedBox(height: 12),
-            TextField(controller: _contentController, maxLines: 4, decoration: NotificationHelper.inputDecor("Nội dung chi tiết...", Icons.message)),
-            
-            const SizedBox(height: 30),
-            SizedBox(
-              width: double.infinity, height: 55,
-              child: ElevatedButton.icon(
-                onPressed: _handleSend,
-                icon: const Icon(Icons.send_rounded, color: Colors.white),
-                label: const Text("GỬI THÔNG BÁO NGAY", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0054A6), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
               ),
-            )
+            ),
+            const SizedBox(height: 12),
           ],
-        ),
+        );
+      },
+    );
+  }
+
+  Widget _buildInputArea() {
+    if (_selectedUser == null) return const SizedBox();
+    
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 25), // Padding dưới để tránh phím ảo
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -2))]
+      ),
+      child: Column(
+        children: [
+          if (_replyingTo != null)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+              margin: const EdgeInsets.only(bottom: 8),
+              decoration: BoxDecoration(color: Colors.blue.withOpacity(0.05), borderRadius: BorderRadius.circular(10)),
+              child: Row(
+                children: [
+                  const Icon(Icons.reply_rounded, size: 18, color: Color(0xFF0054A6)),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text("Trả lời: ${_replyingTo!['message_content']}", style: const TextStyle(fontSize: 12, color: Colors.black54), maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  IconButton(icon: const Icon(Icons.close, size: 18), onPressed: () => setState(() => _replyingTo = null))
+                ],
+              ),
+            ),
+          Row(children: [
+            Expanded(child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 15),
+              decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(25)),
+              child: TextField(
+                controller: _messageController, 
+                maxLines: 4, minLines: 1, 
+                decoration: const InputDecoration(hintText: "Nhập tin nhắn...", border: InputBorder.none, hintStyle: TextStyle(fontSize: 14, color: Colors.grey))
+              ),
+            )),
+            const SizedBox(width: 8),
+            CircleAvatar(
+              backgroundColor: const Color(0xFF0054A6),
+              child: IconButton(
+                onPressed: _isLoading ? null : _handleSend, 
+                icon: const Icon(Icons.send_rounded, color: Colors.white, size: 20)
+              ),
+            ),
+          ]),
+        ],
       ),
     );
-  }
-
-  // --- WIDGETS PHỤ TRỢ ---
-
-  Widget _buildSectionTitle(String title, IconData icon) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 15),
-      child: Row(children: [Icon(icon, color: Colors.blueGrey, size: 20), const SizedBox(width: 8), Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.blueGrey))]),
-    );
-  }
-
-  Widget _buildSelectedList() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 20),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text("Đã chọn ${_verifiedStudents.length} người", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blue)),
-            TextButton(onPressed: () => setState(() => _verifiedStudents.clear()), child: const Text("Xóa hết", style: TextStyle(color: Colors.red, fontSize: 12))),
-          ],
-        ),
-        Container(
-          width: double.infinity, padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(color: Colors.blue.shade50.withOpacity(0.3), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.blue.shade100)),
-          child: Wrap(
-            spacing: 8, runSpacing: 4,
-            children: _verifiedStudents.map((sv) => Chip(
-              label: Text("${sv['name']} (${sv['id']})", style: const TextStyle(fontSize: 10)),
-              onDeleted: () => setState(() => _verifiedStudents.remove(sv)),
-              deleteIconColor: Colors.red,
-              backgroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            )).toList(),
-          ),
-        ),
-        const SizedBox(height: 10),
-        TextButton.icon(onPressed: _showSaveGroupDialog, icon: const Icon(Icons.save_as_rounded, size: 18), label: const Text("Lưu danh sách này thành nhóm ảo")),
-      ],
-    );
-  }
-
-  Future<void> _showSaveGroupDialog() async {
-    final ctrl = TextEditingController();
-    showDialog(context: context, builder: (ctx) => AlertDialog(
-      title: const Text("Tên nhóm ảo mới", style: TextStyle(fontSize: 16)),
-      content: TextField(controller: ctrl, decoration: const InputDecoration(hintText: "VD: Nhóm SV nghiên cứu khoa học")),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Hủy")),
-        ElevatedButton(onPressed: () { _saveGroup(ctrl.text); Navigator.pop(ctx); }, child: const Text("Lưu lại")),
-      ],
-    ));
-  }
-
-  Future<void> _saveGroup(String name) async {
-    if (name.isEmpty) return;
-    try {
-      final res = await http.post(Uri.parse("https://mobi.vinhuni.edu.vn/api/lecturer/create-custom-group"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"group_name": name, "sender_id": _senderId, "student_ids": _verifiedStudents.map((e) => e['id']).join(",")})
-      );
-      if (res.statusCode == 200) { NotificationHelper.showSnack(context, "Đã tạo nhóm ảo thành công!", Colors.green); _loadCustomGroups(); }
-    } catch (e) {}
   }
 
   Future<Iterable<UserSearchModel>> _searchUsersApi(String q) async {
     try {
-      final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/admin/search-user?q=${Uri.encodeComponent(q)}"));
-      if (res.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(res.body);
-        return data.map((j) => UserSearchModel.fromJson(j));
-      }
-    } catch (e) {}
-    return const Iterable.empty();
+      final res = await VinhUniClient.instance.get("/api/admin/search-user", queryParameters: {"q": q, "role": _targetRole});
+      final List<dynamic> data = res.data;
+      return data.map((j) => UserSearchModel.fromJson(j));
+    } catch (e) { return const Iterable.empty(); }
   }
 }

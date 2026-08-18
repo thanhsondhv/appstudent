@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../services/vinhuni_api_client.dart';
 
 final GlobalKey<ChatScreenState> chatScreenKey = GlobalKey<ChatScreenState>();
 
@@ -91,12 +90,10 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // 🔥 TÍNH NĂNG MỚI: Tải lịch sử từ Server
   Future<void> _loadChatHistory(String studentIdStr) async {
   try {
-    final response = await http.get(
-      Uri.parse("https://mobi.vinhuni.edu.vn/api/chatbot-v3/history/$studentIdStr")
-    );
+    final response = await VinhUniClient.instance.get("/api/chatbot-v3/history/$studentIdStr");
     
     if (response.statusCode == 200) {
-      final data = json.decode(utf8.decode(response.bodyBytes));
+      final data = response.data as Map<String, dynamic>;
       final List rawHistory = data['history'] ?? [];
       
       if (mounted) {
@@ -127,18 +124,17 @@ Future<void> _sendResumeContext() async {
   // Lấy nội dung cuối cùng của AI để gửi lên làm ngữ cảnh
   final lastAiMessage = _messages.lastWhere((m) => m['role'] == 'assistant', orElse: () => {});
   
-  final response = await http.post(
-    Uri.parse("https://mobi.vinhuni.edu.vn/api/chatbot-v3/chat"),
-    headers: {"Content-Type": "application/json"},
-    body: jsonEncode({
+  final response = await VinhUniClient.instance.post(
+        "/api/chatbot-v3/chat",
+        data: {
       "message": "RESUME_CONTEXT",
       "last_reply": lastAiMessage['content'] ?? "",
       "studentId": _currentStudentId
-    }),
-  );
+    },
+      );
 
   if (response.statusCode == 200) {
-    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    final data = response.data as Map<String, dynamic>;
     setState(() {
       // CHỈ cập nhật gợi ý, KHÔNG thêm tin nhắn mới vào list
       _suggestions = List<String>.from(data['suggestions'] ?? []);
@@ -148,17 +144,16 @@ Future<void> _sendResumeContext() async {
   // Hàm mới để lấy gợi ý dựa trên tin nhắn cuối cùng mà không làm loãng lịch sử
   Future<void> _resumeSuggestions(String lastContent) async {
     try {
-      final response = await http.post(
-        Uri.parse("https://mobi.vinhuni.edu.vn/api/chatbot-v3/chat"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
+      final response = await VinhUniClient.instance.post(
+        "/api/chatbot-v3/chat",
+        data: {
           "message": "RESUME_CONTEXT", // Server sẽ hiểu đây là lệnh lấy gợi ý
           "last_reply": lastContent,
           "studentId": _currentStudentId,
-        }),
+        },
       );
       if (response.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        final data = response.data as Map<String, dynamic>;
         setState(() {
           _suggestions = List<String>.from(data['suggestions'] ?? []);
         });
@@ -256,18 +251,17 @@ Future<void> _sendResumeContext() async {
     setState(() => _isTyping = true);
 
     try {
-      final response = await http.post(
-        Uri.parse("https://mobi.vinhuni.edu.vn/api/chatbot-v3/chat"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
+      final response = await VinhUniClient.instance.post(
+        "/api/chatbot-v3/chat",
+        data: {
           "message": "INITIAL_GREETING",
           "sessionId": 0,
           "studentId": _currentStudentId,
-        }),
+        },
       ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        final data = response.data as Map<String, dynamic>;
         setState(() {
           _messages.add({"role": "assistant", "content": data['mainReply'] ?? "Xin chào $fullName!"});
           _suggestions = List<String>.from(data['suggestions'] ?? []);
@@ -299,18 +293,17 @@ Future<void> _sendResumeContext() async {
   _scrollToBottom();
 
   try {
-    final response = await http.post(
-      Uri.parse("https://mobi.vinhuni.edu.vn/api/chatbot-v3/chat"),
-      headers: {"Content-Type": "application/json"},
-      body: jsonEncode({
+    final response = await VinhUniClient.instance.post(
+        "/api/chatbot-v3/chat",
+        data: {
         "message": userMessage,
         "sessionId": _sessionId,
         "studentId": _currentStudentId
-      }),
-    ).timeout(const Duration(seconds: 35));
+      },
+      ).timeout(const Duration(seconds: 35));
 
     if (response.statusCode == 200) {
-      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      final data = response.data as Map<String, dynamic>;
       
       setState(() {
         _messages.add({

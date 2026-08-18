@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../core/api/api.dart';
 
 class KhungCTScreen extends StatefulWidget {
   const KhungCTScreen({super.key});
@@ -73,11 +73,10 @@ class _KhungCTScreenState extends State<KhungCTScreen> {
 
   Future<void> _fetchPrograms(String userId) async {
     try {
-      final url = 'https://mobi.vinhuni.edu.vn/api/student-programs/$userId'; 
-      final response = await http.get(Uri.parse(url));
-      
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
+      final response = await Api.get('/api/student-programs/$userId');
+
+      if (response.thanhCong) {
+        final List<dynamic> data = response.data is List ? response.data as List : const [];
         setState(() {
           programList = data.map((e) => {
             "program_id": e["program_id"].toString(),
@@ -94,10 +93,11 @@ class _KhungCTScreenState extends State<KhungCTScreen> {
   Future<void> _fetchCurriculum(String programId) async {
     setState(() => isLoading = true);
     try {
-      final url = 'https://mobi.vinhuni.edu.vn/api/curriculum-progress/$programId?student_id=$currentUserId';
-      
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
+      final response = await Api.get(
+        '/api/curriculum-progress/$programId',
+        thamSo: {'student_id': currentUserId},
+      );
+      if (response.thanhCong) {
         final List<dynamic> data = json.decode(response.body);
         setState(() {
           curriculumData = data;

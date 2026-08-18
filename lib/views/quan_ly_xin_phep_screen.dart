@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:intl/intl.dart'; 
+import '../core/api/api.dart';
 
 class QuanLyXinPhepScreen extends StatefulWidget {
   final String studentId;
@@ -25,6 +24,9 @@ class _QuanLyXinPhepScreenState extends State<QuanLyXinPhepScreen> with SingleTi
   
   // Trạng thái Loading
   bool _isSubmitting = false;
+
+  /// Giữ Future lịch sử đơn để không gọi lại API mỗi lần vẽ màn hình.
+  Future<ApiResponse>? _futureLichSu;
   bool _isLoadingClasses = false;
   List<dynamic> _classList = [];
 
@@ -62,13 +64,13 @@ class _QuanLyXinPhepScreenState extends State<QuanLyXinPhepScreen> with SingleTi
 
     try {
       // Gửi kèm tham số lọc year và semester lên Backend
-      final String url = "https://mobi.vinhuni.edu.vn/api/student/my-classes/${widget.studentId}"
-          "?year=$_selectedYear&semester=$_selectedSemester";
-          
-      final res = await http.get(Uri.parse(url));
-      if (res.statusCode == 200) {
+      final res = await Api.get(
+        "/api/student/my-classes/${widget.studentId}",
+        thamSo: {"year": _selectedYear, "semester": _selectedSemester},
+      );
+      if (res.thanhCong && mounted) {
         setState(() {
-          _classList = jsonDecode(res.body);
+          _classList = res.data is List ? res.data as List : const [];
         });
       }
     } catch (e) {
@@ -266,16 +268,35 @@ class _QuanLyXinPhepScreenState extends State<QuanLyXinPhepScreen> with SingleTi
     );
   }
 
+  /// Nạp lịch sử đơn xin phép.
+  ///
+  /// Sửa 18/08/2026 (Pha 1): trước đây `future:` gọi thẳng `http.get` trong
+  /// `build()`, nên mỗi lần màn hình vẽ lại — gõ phím, xoay máy, đổi thẻ — là
+  /// gọi mạng thêm một lần. Nay Future được giữ trong trạng thái và chỉ tạo
+  /// lại khi thực sự cần làm mới.
+  Future<ApiResponse> _taiLichSuDon() =>
+      Api.get("/api/student/attendance-history/${widget.studentId}");
+
   Widget _buildHistoryTab() {
+    _futureLichSu ??= _taiLichSuDon();
+
     return RefreshIndicator(
-      onRefresh: () async => setState(() {}),
-      child: FutureBuilder(
-        future: http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/student/attendance-history/${widget.studentId}")),
+      onRefresh: () async {
+        setState(() => _futureLichSu = _taiLichSuDon());
+        await _futureLichSu;
+      },
+      child: FutureBuilder<ApiResponse>(
+        future: _futureLichSu,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
           if (snapshot.hasError || !snapshot.hasData) return const Center(child: Text("Lỗi kết nối máy chủ!"));
+          if (!snapshot.data!.thanhCong) {
+            return Center(child: Text(snapshot.data!.thongDiepLoi,
+                style: const TextStyle(color: Colors.grey)));
+          }
 
-          final List history = jsonDecode(snapshot.data!.body)['data'] ?? [];
+          final duLieu = snapshot.data!.data;
+          final List history = (duLieu is Map ? duLieu['data'] : duLieu) as List? ?? [];
           if (history.isEmpty) return const Center(child: Text("Bạn chưa có đơn xin phép nào.", style: TextStyle(color: Colors.grey)));
 
           return ListView.separated(
@@ -311,10 +332,9 @@ class _QuanLyXinPhepScreenState extends State<QuanLyXinPhepScreen> with SingleTi
     }
     setState(() => _isSubmitting = true);
     try {
-      final res = await http.post(
-        Uri.parse("https://mobi.vinhuni.edu.vn/api/student/send-attendance-request"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
+      final res = await Api.post(
+        "/api/student/send-attendance-request",
+        duLieu: {
           "student_id": widget.studentId,
           "lhp_code": _selectedLhpId,
           "category": _selectedCategory,
@@ -322,15 +342,25 @@ class _QuanLyXinPhepScreenState extends State<QuanLyXinPhepScreen> with SingleTi
           "year": _selectedYear,
           "semester": _selectedSemester,
           "absence_date": DateFormat('yyyy-MM-dd').format(_selectedDate),
-        }),
+        },
       );
-      if (res.statusCode == 200) {
+      if (!mounted) return;
+
+      if (res.thanhCong) {
         _showSnack("Đã gửi đơn thành công!", Colors.green);
         _reasonController.clear();
+        // Buộc tải lại lịch sử để thấy đơn vừa gửi
+        setState(() => _futureLichSu = _taiLichSuDon());
         _tabController.animateTo(1);
+      } else {
+        // Sửa 18/08/2026: bản cũ không có nhánh này — máy chủ từ chối thì màn
+        // hình im lặng, sinh viên tưởng đã gửi đơn nghỉ học thành công.
+        _showSnack(res.thongDiepLoi, Colors.red);
       }
-    } catch (e) { _showSnack("Lỗi kết nối Server", Colors.red); }
-    setState(() => _isSubmitting = false);
+    } catch (e) {
+      if (mounted) _showSnack("Lỗi kết nối máy chủ", Colors.red);
+    }
+    if (mounted) setState(() => _isSubmitting = false);
   }
 
   Widget _buildStatusTag(int status) {

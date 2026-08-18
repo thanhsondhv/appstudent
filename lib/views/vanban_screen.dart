@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:share_plus/share_plus.dart';
 import 'dart:io'; // 🔥 Sửa lỗi: Platform, Directory
@@ -9,6 +7,7 @@ import 'package:path_provider/path_provider.dart'; // 🔥 Sửa lỗi: getExter
 import 'package:permission_handler/permission_handler.dart'; // 🔥 Sửa lỗi: Permission
 // 🔥 QUAN TRỌNG: Sửa đường dẫn này cho đúng với cấu trúc project của Sơn
 import 'package:vinhuni_app/services/database_helper.dart'; 
+import '../core/api/api.dart';
 
 class VanBanScreen extends StatefulWidget {
   const VanBanScreen({super.key});
@@ -60,21 +59,28 @@ class _VanBanScreenState extends State<VanBanScreen> {
 
     try {
       // Xây dựng URL với đầy đủ tham số lọc
-      String url = "https://mobi.vinhuni.edu.vn/api/docs/search"
-          "?query=${Uri.encodeComponent(query)}"
-          "&is_ai=${isAiSearch ? 1 : 0}";
-
-      if (selectedCategory != "Tất cả") url += "&category=${Uri.encodeComponent(selectedCategory)}";
-      if (selectedMonth > 0) url += "&month=$selectedMonth";
+      // Dùng map tham số thay vì tự nối chuỗi — Dio lo phần mã hoá,
+      // không còn nguy cơ quên Uri.encodeComponent ở một nhánh nào đó.
+      final thamSo = <String, dynamic>{
+        "query": query,
+        "is_ai": isAiSearch ? 1 : 0,
+      };
+      if (selectedCategory != "Tất cả") thamSo["category"] = selectedCategory;
+      if (selectedMonth > 0) thamSo["month"] = selectedMonth;
       if (startDate != null && endDate != null) {
-        url += "&start_date=${startDate!.toIso8601String().split('T')[0]}";
-        url += "&end_date=${endDate!.toIso8601String().split('T')[0]}";
+        thamSo["start_date"] = startDate!.toIso8601String().split('T')[0];
+        thamSo["end_date"] = endDate!.toIso8601String().split('T')[0];
       }
 
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 15));
+      final response = await Api.get(
+        "/api/docs/search",
+        thamSo: thamSo,
+        hanCho: const Duration(seconds: 15),
+      );
 
-      if (response.statusCode == 200) {
-        final List<dynamic> newDocs = jsonDecode(response.body);
+      if (response.thanhCong) {
+        final List<dynamic> newDocs =
+            response.data is List ? response.data as List : const [];
         setState(() {
           documents = newDocs;
           isLoading = false;

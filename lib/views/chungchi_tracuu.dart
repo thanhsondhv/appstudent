@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import '../core/api/api.dart';
 
 class ChungChiTraCuuScreen extends StatefulWidget {
   final String userMaSV;
@@ -13,7 +12,6 @@ class ChungChiTraCuuScreen extends StatefulWidget {
 
 class _ChungChiTraCuuScreenState extends State<ChungChiTraCuuScreen> {
   // Cấu hình URL Backend (Sử dụng 10.0.2.2 cho Android Emulator)
-  final String baseUrl = "https://mobi.vinhuni.edu.vn";
 
   // Palette màu chuẩn VinhUni
   final Color vinhUniBlue = const Color(0xFF0054A6);
@@ -39,9 +37,9 @@ class _ChungChiTraCuuScreenState extends State<ChungChiTraCuuScreen> {
   // 1. Tải danh sách chứng chỉ
   Future<void> _loadChungChi() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/api/chung-chi'));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
+      final response = await Api.get('/api/chung-chi');
+      if (response.thanhCong) {
+        final data = response.data is Map ? response.data as Map : const {};
         setState(() {
           dsChungChi = data['ds_chung_chi'] ?? [];
         });
@@ -58,9 +56,9 @@ class _ChungChiTraCuuScreenState extends State<ChungChiTraCuuScreen> {
       selectedDotThi = null;
     });
     try {
-      final response = await http.get(Uri.parse('$baseUrl/api/dot-thi?loai=$loaiId'));
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
+      final response = await Api.get('/api/dot-thi', thamSo: {'loai': loaiId});
+      if (response.thanhCong) {
+        final data = response.data is Map ? response.data as Map : const {};
         setState(() {
           dsDotThi = data['ds_dot_thi'] ?? [];
         });
@@ -80,25 +78,25 @@ class _ChungChiTraCuuScreenState extends State<ChungChiTraCuuScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/tra-cuu'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
+      final response = await Api.post(
+        '/api/tra-cuu',
+        duLieu: {
           "ma_sv": widget.userMaSV,
           "loai_chung_chi": selectedLoaiCC,
           "dot_thi": selectedDotThi
-        }),
+        },
       );
+      if (!mounted) return;
 
-      final data = json.decode(response.body);
+      final data = response.data is Map ? response.data as Map : const {};
 
-      if (response.statusCode == 200) {
+      if (response.thanhCong) {
         setState(() {
           _examResult = data['lich_thi'];
         });
       } else {
         setState(() => _examResult = []);
-        _showSnackBar(data['error'] ?? "Không tìm thấy dữ liệu.");
+        _showSnackBar(data['error']?.toString() ?? response.thongDiepLoi);
       }
     } catch (e) {
       _showSnackBar("Lỗi kết nối máy chủ.");

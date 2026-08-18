@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'notification_helper.dart'; // File helper Sơn gửi mình
+import '../../core/api/api.dart';
 
 class SendAllSchoolScreen extends StatefulWidget {
   const SendAllSchoolScreen({super.key});
@@ -50,18 +49,27 @@ class _SendAllSchoolScreenState extends State<SendAllSchoolScreen> {
       final prefs = await SharedPreferences.getInstance();
       final senderId = prefs.getString('user_id') ?? "Admin";
 
-      final response = await http.post(
-        Uri.parse("https://mobi.vinhuni.edu.vn/api/admin/send-notification-all"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
+      final response = await Api.post(
+        "/api/admin/send-notification-all",
+        duLieu: {
           "title": _titleController.text,
           "content": _contentController.text,
           "sender_id": senderId,
           "target_type": _targetType,
-        }),
+        },
       );
 
-      final resData = jsonDecode(response.body);
+      if (!response.thanhCong) {
+        // Sửa 18/08/2026: bản cũ đọc thẳng resData['status'] nên khi máy chủ
+        // trả 500 kèm nội dung không phải JSON thì ném ngoại lệ, người gửi
+        // không biết thông báo đã đi hay chưa.
+        if (context.mounted) {
+          NotificationHelper.showSnack(context, response.thongDiepLoi, Colors.red);
+        }
+        return;
+      }
+
+      final resData = response.data is Map ? response.data as Map : const {};
       if (resData['status'] == 'success') {
         NotificationHelper.showSnack(context, "Đã đưa thông báo vào hàng đợi gửi!", Colors.green);
         _titleController.clear();

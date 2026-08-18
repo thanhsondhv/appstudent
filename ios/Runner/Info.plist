@@ -46,6 +46,15 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+	<string>https</string>
+	<string>http</string>
+	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>VinhUni cần dùng Mic để ghi âm biên bản họp.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>VinhUni cần quyền nhận diện giọng nói để chuyển thành văn bản thời gian thực.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>VinhUni cần truy cập Camera để thực hiện nhận diện khuôn mặt sinh viên trong quá trình điểm danh.</string>
 	<key>NSFaceIDUsageDescription</key>

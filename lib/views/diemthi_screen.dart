@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../services/diemthi.dart';
 import '../services/database_helper.dart'; // 🔥 Sửa lỗi DatabaseHelper
+import '../core/api/api.dart';
 
 class DiemThiScreen extends StatefulWidget {
   const DiemThiScreen({super.key});
@@ -114,11 +114,14 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
 
     // B. GỌI API ĐỒNG BỘ BẢN MỚI
     try {
-      final url = 'https://mobi.vinhuni.edu.vn/api/get-grades/$userId?nam_hoc=$nam&hoc_ky=$ky&program_id=$prog';
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 10));
-      
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
+      final response = await Api.get(
+        '/api/get-grades/$userId',
+        thamSo: {'nam_hoc': nam, 'hoc_ky': ky, 'program_id': prog},
+        hanCho: const Duration(seconds: 10),
+      );
+
+      if (response.thanhCong) {
+        final List<dynamic> data = response.data is List ? response.data as List : const [];
         await db.saveGrades(userId, nam, ky, prog, data); // Lưu lại vào SQLite
         
         if (mounted) {
@@ -137,9 +140,8 @@ class _DiemThiScreenState extends State<DiemThiScreen> {
   // --- 3. CÁC HÀM HỖ TRỢ ---
   Future<void> _fetchPrograms(String userId) async {
     try {
-      final url = 'https://mobi.vinhuni.edu.vn/api/student-programs/$userId'; 
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
+      final response = await Api.get('/api/student-programs/$userId');
+      if (response.thanhCong) {
         final List<dynamic> data = json.decode(response.body);
         setState(() {
           programList = [

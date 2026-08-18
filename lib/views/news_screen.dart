@@ -1,16 +1,15 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:flutter_html/flutter_html.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../core/api/api.dart';
 
 
 // ═══════════════════════════════════════════════════════
 //  CONFIG
 // ═══════════════════════════════════════════════════════
-const String kNewsUrl       = 'https://mobi.vinhuni.edu.vn/api/news';
-const String kNewsSearchUrl = 'https://mobi.vinhuni.edu.vn/api/news_search';
+const String kNewsUrl       = '/api/news';
+const String kNewsSearchUrl = '/api/news_search';
 const String kImgBase       = 'https://vinhuni.edu.vn';
 
 // ─── Design tokens ───────────────────────────────────
@@ -113,30 +112,32 @@ class NewsService {
   static const int pageSize = 6;
 
   static Future<NewsResult> fetch(int page) async {
-    final res = await http.post(Uri.parse(kNewsUrl),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'page': page}),
-    ).timeout(const Duration(seconds: 10));
+    final res = await Api.post(
+      kNewsUrl,
+      duLieu: {'page': page},
+      hanCho: const Duration(seconds: 10),
+    );
     return _parse(res);
   }
 
   static Future<NewsResult> search(String keyword, int page) async {
-    final res = await http.post(Uri.parse(kNewsSearchUrl),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'keyword': keyword, 'page': page}),
-    ).timeout(const Duration(seconds: 10));
+    final res = await Api.post(
+      kNewsSearchUrl,
+      duLieu: {'keyword': keyword, 'page': page},
+      hanCho: const Duration(seconds: 10),
+    );
     return _parse(res);
   }
 
-  static NewsResult _parse(http.Response res) {
-    final body = jsonDecode(utf8.decode(res.bodyBytes));
-    if (res.statusCode == 200 && body['status'] == 'success') {
+  static NewsResult _parse(ApiResponse res) {
+    final body = res.data is Map ? res.data as Map : const {};
+    if (res.thanhCong && body['status'] == 'success') {
       final List data = (body['data'] ?? []) as List;
       final items = data.map((e) => NewsItem.fromJson(e as Map<String, dynamic>)).toList();
       final total = (body['total'] ?? 0) as int;
       return NewsResult(items: items, total: total);
     }
-    throw Exception(body['message'] ?? 'HTTP ${res.statusCode}');
+    throw Exception(body['message']?.toString() ?? res.thongDiepLoi);
   }
 }
 

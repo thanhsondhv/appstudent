@@ -1,3 +1,5 @@
+// lib/views/schedule_canbo.dart
+
 class WeeklySchedule {
   final int id;
   final String date;
@@ -7,13 +9,6 @@ class WeeklySchedule {
   final String participants;
   final String location;
   final String chair;
-  final String eventHash;
-  final String targetGroups;
-  final int isNotified;
-  final int isModified;
-  final String createdAt;
-  final String updatedAt;
-  final int isReminderSent;
 
   WeeklySchedule({
     required this.id,
@@ -24,16 +19,9 @@ class WeeklySchedule {
     required this.participants,
     required this.location,
     required this.chair,
-    this.eventHash = '',
-    this.targetGroups = '',
-    this.isNotified = 0,
-    this.isModified = 0,
-    this.createdAt = '',
-    this.updatedAt = '',
-    this.isReminderSent = 0,
   });
 
-  // --- 1. CHUYỂN TỪ JSON (API) SANG OBJECT ---
+  // --- Chuyển từ JSON (API) sang Object ---
   factory WeeklySchedule.fromJson(Map<String, dynamic> json) {
     return WeeklySchedule(
       id: json['ScheduleId'] ?? 0,
@@ -44,18 +32,10 @@ class WeeklySchedule {
       participants: json['Participants'] ?? '',
       location: json['Location'] ?? '',
       chair: json['Chairperson'] ?? '',
-      eventHash: json['EventHash'] ?? '',
-      targetGroups: json['TargetGroups'] ?? '',
-      // Xử lý kiểu bool từ API sang int (0/1) cho SQLite
-      isNotified: (json['IsNotified'] == true || json['IsNotified'] == 1) ? 1 : 0,
-      isModified: (json['IsModified'] == true || json['IsModified'] == 1) ? 1 : 0,
-      createdAt: json['CreatedAt'] ?? '',
-      updatedAt: json['UpdatedAt'] ?? '',
-      isReminderSent: (json['IsReminderSent'] == true || json['IsReminderSent'] == 1) ? 1 : 0,
     );
   }
 
-  // --- 2. CHUYỂN TỪ MAP (SQLITE) SANG OBJECT ---
+  // --- Chuyển từ Map (SQLite) sang Object ---
   factory WeeklySchedule.fromMap(Map<String, dynamic> map) {
     return WeeklySchedule(
       id: map['ScheduleId'] ?? 0,
@@ -66,17 +46,10 @@ class WeeklySchedule {
       participants: map['Participants'] ?? '',
       location: map['Location'] ?? '',
       chair: map['Chairperson'] ?? '',
-      eventHash: map['EventHash'] ?? '',
-      targetGroups: map['TargetGroups'] ?? '',
-      isNotified: map['IsNotified'] ?? 0,
-      isModified: map['IsModified'] ?? 0,
-      createdAt: map['CreatedAt'] ?? '',
-      updatedAt: map['UpdatedAt'] ?? '',
-      isReminderSent: map['IsReminderSent'] ?? 0,
     );
   }
 
-  // --- 3. CHUYỂN TỪ OBJECT SANG MAP (ĐỂ LƯU XUỐNG SQLITE) ---
+  // --- Chuyển từ Object sang Map để lưu xuống SQLite ---
   Map<String, dynamic> toMap() {
     return {
       'ScheduleId': id,
@@ -87,13 +60,6 @@ class WeeklySchedule {
       'Participants': participants,
       'Location': location,
       'Chairperson': chair,
-      'EventHash': eventHash,
-      'TargetGroups': targetGroups,
-      'IsNotified': isNotified,
-      'IsModified': isModified,
-      'CreatedAt': createdAt,
-      'UpdatedAt': updatedAt,
-      'IsReminderSent': isReminderSent,
     };
   }
 }

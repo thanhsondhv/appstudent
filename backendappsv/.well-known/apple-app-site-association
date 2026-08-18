@@ -1,0 +1,11 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "V9L7W52Z68.vn.edu.vinhuni.studentapp",
+        "paths": ["/office365_login", "/login-success/*"]
+      }
+    ]
+  }
+}

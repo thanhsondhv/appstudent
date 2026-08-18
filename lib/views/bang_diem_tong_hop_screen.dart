@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../core/api/api.dart';
 
 class BangDiemTongHopScreen extends StatefulWidget {
   const BangDiemTongHopScreen({super.key});
@@ -56,11 +56,10 @@ class _BangDiemTongHopScreenState extends State<BangDiemTongHopScreen> {
   Future<void> _fetchPrograms(String userId) async {
     try {
       // 🔥 ĐỔI IP Ở ĐÂY
-      final url = 'https://mobi.vinhuni.edu.vn/api/student-programs/$userId'; 
-      final response = await http.get(Uri.parse(url));
-      
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
+      final response = await Api.get('/api/student-programs/$userId');
+
+      if (response.thanhCong) {
+        final List<dynamic> data = response.data is List ? response.data as List : const [];
         setState(() {
           programList = [
             {"program_id": "ALL", "program_name": "Tất cả ngành học"},
@@ -78,10 +77,11 @@ class _BangDiemTongHopScreenState extends State<BangDiemTongHopScreen> {
     setState(() => isLoading = true);
     try {
       // 🔥 ĐỔI IP Ở ĐÂY
-      final url = 'https://mobi.vinhuni.edu.vn/api/transcript-summary/$currentUserId?program_id=$programId';
-      
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
+      final response = await Api.get(
+        '/api/transcript-summary/$currentUserId',
+        thamSo: {'program_id': programId},
+      );
+      if (response.thanhCong) {
         final List<dynamic> data = json.decode(response.body);
         setState(() {
           transcriptData = data;

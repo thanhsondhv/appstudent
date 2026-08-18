@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'package:geolocator/geolocator.dart';
 import 'package:local_auth/local_auth.dart';
+import '../core/api/api.dart';
 
 class DiemDanhSvScreen extends StatefulWidget {
   final String studentId;
@@ -72,20 +71,28 @@ class _DiemDanhSvScreenState extends State<DiemDanhSvScreen> {
       }
 
       // C. Gọi API Backend (Sơn nhớ đổi URL nếu chạy thật nhé)
-      final response = await http.post(
-        Uri.parse("https://mobi.vinhuni.edu.vn/api/attendance/submit"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
+      final response = await Api.post(
+        "/api/attendance/submit",
+        duLieu: {
           "student_id": widget.studentId,
           "code": pin,
           "lat": position.latitude,
           "lon": position.longitude,
-          "is_biometric_valid": true 
-        }),
+          "is_biometric_valid": true
+        },
       );
 
-      final resData = jsonDecode(response.body);
-      
+      if (!response.thanhCong) {
+        // Sửa 18/08/2026: bản cũ đọc thẳng jsonDecode(response.body) nên khi
+        // máy chủ trả 500 kèm nội dung không phải JSON thì ném ngoại lệ, sinh
+        // viên chỉ thấy "Lỗi kết nối" và không biết đã điểm danh được chưa.
+        _showSnackBar(response.thongDiepLoi, Colors.red);
+        _clearPin();
+        return;
+      }
+
+      final resData = response.data is Map ? response.data as Map : const {};
+
       if (resData['status'] == 'success') {
         _showSuccessDialog("Hệ thống đã ghi nhận bạn có mặt!");
       } else {

@@ -1,0 +1,19 @@
+{
+    "android": {
+        "latest_version": "1.0.0+10",
+        "is_force": false,
+        "url": "https://play.google.com/store/apps/details?id=vn.edu.vinhuni.studentapp",
+        "message": "Trợ lý VinhUni đã sẵn sàng! Cập nhật để trải nghiệm các tính năng thông minh mới."
+    },
+    "ios": {
+        "latest_version": "1.3.3+20",
+        "is_force": false,
+        "url": "https://apps.apple.com/vn/app/vinhuni-app/id6758928438",
+        "message": "Hệ thống nâng cấp Trợ lý ảo & Bảo mật 1.3.1. Vui lòng cập nhật và đăng nhập lại để tiếp tục sử dụng."
+    },
+    "announcement": {
+        "title": "Chào mừng Trợ lý VinhUni (ViA)",
+        "content": "Phiên bản 1.3.1 đã chính thức tích hợp Trợ lý thông minh. Hãy đăng xuất và đăng nhập lại để làm mới quyền truy cập của bạn.",
+        "show_alert": true
+    }
+}

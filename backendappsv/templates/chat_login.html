@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+    <html lang="vi">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>VinhUni Portal - Đăng nhập Chat</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    </head>
+    <body class="bg-gradient-to-br from-blue-900 via-slate-900 to-black h-screen flex items-center justify-center p-4">
+        <div class="bg-white/95 backdrop-blur-md p-8 rounded-3xl shadow-2xl w-full max-w-md border border-white/20">
+            <div class="text-center mb-8">
+                <img src="https://vinhuni.edu.vn/logo.png" alt="VinhUni" class="h-16 mx-auto mb-4">
+                <h1 class="text-2xl font-extrabold text-blue-900">VINHUNI CHAT</h1>
+                <p class="text-slate-500 text-xs mt-1 uppercase tracking-widest font-semibold">Hệ sinh thái thông minh</p>
+            </div>
+
+            <div class="flex p-1 bg-slate-100 rounded-xl mb-6">
+                <button onclick="switchTab('pass')" id="btn-pass" class="flex-1 py-2 text-xs font-bold rounded-lg bg-white shadow text-blue-900 transition-all">MẬT KHẨU</button>
+                <button onclick="switchTab('face')" id="btn-face" class="flex-1 py-2 text-xs font-bold rounded-lg text-slate-500 transition-all">KHUÔN MẶT</button>
+            </div>
+
+            <div id="form-pass" class="space-y-4">
+                <div class="relative">
+                    <i class="fa-solid fa-user absolute left-3 top-3.5 text-slate-400"></i>
+                    <input type="text" id="user_code" placeholder="Mã số sinh viên/Cán bộ" 
+                           class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <div class="relative">
+                    <i class="fa-solid fa-lock absolute left-3 top-3.5 text-slate-400"></i>
+                    <input type="password" id="password" placeholder="Mật khẩu" 
+                           class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                </div>
+                <button onclick="loginWithPass()" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-3 rounded-xl shadow-lg shadow-blue-200 transition-all flex items-center justify-center">
+                    <span id="login-text">ĐĂNG NHẬP HỆ THỐNG</span>
+                </button>
+            </div>
+
+            <div id="form-face" class="hidden text-center space-y-4">
+                <div class="w-32 h-32 bg-slate-100 rounded-full mx-auto flex items-center justify-center border-4 border-blue-100">
+                    <i class="fa-solid fa-face-viewfinder text-4xl text-blue-600 animate-pulse"></i>
+                </div>
+                <p class="text-xs text-slate-500">Hệ thống sẽ sử dụng AI để nhận diện</p>
+                <button onclick="loginWithFace()" class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl">BẮT ĐẦU QUÉT MẶT</button>
+            </div>
+
+            <div class="relative my-8">
+                <div class="absolute inset-0 flex items-center"><div class="w-full border-t border-slate-200"></div></div>
+                <div class="relative flex justify-center text-xs"><span class="px-2 bg-white text-slate-400 font-medium">HOẶC DÙNG</span></div>
+            </div>
+
+            <button onclick="loginWithMS()" class="w-full border-2 border-slate-200 hover:border-blue-500 text-slate-700 font-bold py-3 rounded-xl flex items-center justify-center space-x-3 transition-all">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/4/44/Microsoft_logo.svg" class="h-4">
+                <span class="text-sm">MICROSOFT 365</span>
+            </button>
+
+            <p class="text-center text-[10px] text-slate-400 mt-8 font-medium">© 2026 VINH UNIVERSITY - IT CENTER</p>
+        </div>
+
+        <form id="secure-form" action="/chat-groups" method="POST" class="hidden">
+            <input type="hidden" name="token" id="hidden-fb-token">
+            <input type="hidden" name="ms_token" id="hidden-ms-token">
+            <input type="hidden" name="user_id" id="hidden-user-id">
+            <input type="hidden" name="user_name" id="hidden-user-name">
+        </form>
+
+        <script>
+            function switchTab(type) {
+                document.getElementById('form-pass').classList.toggle('hidden', type !== 'pass');
+                document.getElementById('form-face').classList.toggle('hidden', type !== 'face');
+                document.getElementById('btn-pass').className = type === 'pass' ? 'flex-1 py-2 text-xs font-bold rounded-lg bg-white shadow text-blue-900 transition-all' : 'flex-1 py-2 text-xs font-bold rounded-lg text-slate-500';
+                document.getElementById('btn-face').className = type === 'face' ? 'flex-1 py-2 text-xs font-bold rounded-lg bg-white shadow text-blue-900 transition-all' : 'flex-1 py-2 text-xs font-bold rounded-lg text-slate-500';
+            }
+
+            async function loginWithPass() {
+    const username = document.getElementById('user_code').value; 
+    const password = document.getElementById('password').value;
+    
+    if(!username || !password) return alert("Vui lòng nhập tài khoản và mật khẩu!");
+
+    const btnText = document.getElementById('login-text');
+    btnText.innerText = "ĐANG XÁC THỰC...";
+
+    try {
+        // 🔥 ĐÃ SỬA: Thêm dấu }); để đóng lệnh fetch đúng cách
+        const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ username, password })
+        }); // <--- Dấu này nãy Sơn bị thiếu nè
+        
+        const result = await response.json();
+        
+        if (result.status === "success") {
+            const userData = result.data;
+            
+            // Điền vào form ẩn để chuyển sang trang Chat bảo mật
+            document.getElementById('hidden-fb-token').value = userData.firebase_chat_token;
+            document.getElementById('hidden-ms-token').value = userData.access_token;
+            document.getElementById('hidden-user-id').value = userData.user_code;
+            document.getElementById('hidden-user-name').value = userData.full_name;
+            
+            // Submit form để nhảy sang cổng 8080/chat-secure
+            document.getElementById('secure-form').submit();
+        } else {
+            alert("Lỗi: " + (result.message || "Thông tin không chính xác!"));
+            btnText.innerText = "ĐĂNG NHẬP LẠI";
+        }
+    } catch (e) {
+        console.error(e);
+        alert("Không thể kết nối tới Server VinhUni");
+        btnText.innerText = "THỬ LẠI";
+    }
+}
+
+            function loginWithMS() {
+                alert("Đang chuyển hướng tới cổng Microsoft 365 VinhUni...");
+             
+                window.location.href = "/api/auth/microsoft-login";
+            }
+
+            function loginWithFace() {
+                alert("Đang kích hoạt Camera nhận diện khuôn mặt AI...");
+               
+            }
+        </script>
+    </body>
+    </html>

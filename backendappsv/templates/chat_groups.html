@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>VinhUni Chat Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.15.0/firebase-firestore-compat.js"></script>
+    <style>
+    /* CSS THEME ZALO - VINHUNI: ĐỒNG BỘ HÓA GIAO DIỆN */
+    :root { 
+        --vinhuni-blue: #0054A6; 
+        --header-height: 60px; /* Ép cứng độ cao header */
+        --search-height: 65px; /* Ép cứng độ cao thanh tìm kiếm */
+    }
+
+    .zalo-header {
+        position: fixed; top: 0; left: 0; right: 0;
+        background-color: var(--vinhuni-blue); 
+        color: white;
+        height: var(--header-height); /* Dùng biến để dễ đồng bộ */
+        z-index: 50; 
+        display: flex; 
+        align-items: center;
+        padding: 0 15px; 
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    /* KHUNG TÌM KIẾM CỐ ĐỊNH NẰM DƯỚI HEADER */
+    .zalo-search-bar {
+        position: fixed; 
+        top: var(--header-height); /* Bám sát ngay dưới header */
+        left: 0; 
+        right: 0;
+        height: var(--search-height);
+        background-color: white; 
+        z-index: 40; 
+        padding: 10px 15px;
+        display: flex;
+        align-items: center;
+        border-bottom: 1px solid #f1f5f9; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+    }
+
+    .header-title { 
+        flex: 1; 
+        text-align: center; 
+        margin-right: 35px; 
+    }
+
+    /* HIỆU ỨNG NẠP DANH SÁCH: KHÔNG BỊ NHẢY TRANG */
+    #group-list { 
+        /* Tổng padding = Header (60) + Search (65) = 125px */
+        padding-top: calc(var(--header-height) + var(--search-height)) !important; 
+        background-color: #F8FAFC; 
+        min-height: 100vh; 
+    }
+
+    .group-item:active { 
+        background: #f1f5f9; 
+        transform: scale(0.98); 
+    }
+
+    /* ANIMATION MƯỢT MÀ */
+    .modal-animate { 
+        animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+    }
+    @keyframes slideUp { 
+        from { transform: translateY(100%); } 
+        to { transform: translateY(0); } 
+    }
+
+    .animate-fade-in { 
+        animation: fadeIn 0.3s ease-out; 
+    }
+    @keyframes fadeIn { 
+        from { opacity: 0; transform: translateY(8px); } 
+        to { opacity: 1; transform: translateY(0); } 
+    }
+</style>
+</head>
+<body class="bg-slate-50 font-sans antialiased">
+
+    <div class="max-w-md mx-auto relative overflow-hidden">
+        <div class="zalo-header">
+            <div onclick="handleBackToApp()" class="p-2 cursor-pointer hover:bg-white/10 rounded-full">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 19l-7-7 7-7" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="header-title">
+                <div class="text-[15px] font-bold tracking-tight">MESSAGE VINHUNI</div>
+                <div class="text-[9px] opacity-70 uppercase font-medium tracking-tighter">Hệ thống bảo mật mã hóa</div>
+            </div>
+            <div onclick="showCreateGroupModal()" class="p-2 cursor-pointer hover:bg-white/10 rounded-full">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" stroke-width="2" stroke-linecap="round"/></svg>
+            </div>
+        </div>
+		<div class="zalo-search-bar flex items-center space-x-2">
+			<div class="flex-1 bg-slate-100 focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-500 transition-all rounded-xl flex items-center px-4 py-2.5">
+				<svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+				<input type="text" oninput="globalGroupSearch(this.value)" placeholder="Lọc hội thoại hiện tại..." class="bg-transparent border-none outline-none w-full text-sm font-medium text-slate-700 ml-3">
+			</div>
+			
+			<button onclick="openSearchModal('', '')" class="bg-blue-50 text-blue-600 p-2.5 rounded-xl hover:bg-blue-100 transition-all shadow-sm" title="Tìm cá nhân trên hệ thống">
+				<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
+			</button>
+		</div>
+
+        <div id="group-list" class="max-w-md mx-auto p-3 space-y-1">
+        <div class="animate-pulse space-y-4 p-4">
+            <div class="flex items-center space-x-4">
+                <div class="rounded-2xl bg-slate-200 h-12 w-12"></div>
+                <div class="flex-1 space-y-2 py-1">
+                    <div class="h-4 bg-slate-200 rounded w-3/4"></div>
+                    <div class="h-3 bg-slate-200 rounded w-1/2"></div>
+                </div>
+            </div>
+            </div>
+    </div>
+
+        <div id="search-modal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-end justify-center">
+            <div class="bg-white w-full max-w-md rounded-t-3xl flex flex-col max-h-[90vh] modal-animate shadow-2xl">
+                <div class="p-5 border-b flex justify-between items-center sticky top-0 bg-white rounded-t-3xl">
+                    <h2 class="font-bold text-lg text-slate-800" id="modal-title">Thành viên</h2>
+                    <button onclick="closeSearchModal()" class="text-slate-400 p-2 text-xl">✕</button>
+                </div>
+                <div class="p-4 bg-slate-50">
+                    <input type="text" id="user-search-input" oninput="handleSearch(this.value)" placeholder="Mã số hoặc tên cán bộ..." class="w-full px-5 py-3.5 border border-slate-200 rounded-2xl outline-none text-sm focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div id="search-results" class="flex-1 overflow-y-auto min-h-[350px] p-2"></div>
+                <div id="confirm-bar" class="p-4 bg-white border-t hidden">
+                    <button onclick="addSelectedMembers()" id="btn-add-multi" class="w-full bg-blue-700 text-white font-bold py-4 rounded-2xl shadow-lg uppercase text-sm">XÁC NHẬN THÊM</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="create-group-modal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+            <div class="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl modal-animate">
+                <div class="p-6 space-y-5">
+                    <h2 class="text-xl font-bold text-slate-800">Tạo nhóm hội thoại</h2>
+                    <div class="space-y-1">
+                        <label class="text-[10px] font-bold text-slate-400 uppercase ml-1">Tên nhóm</label>
+                        <input type="text" id="new-group-name" class="w-full px-4 py-3.5 bg-slate-100 rounded-2xl outline-none text-sm border-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div class="space-y-1">
+                        <label class="text-[10px] font-bold text-slate-400 uppercase ml-1">Phân quyền</label>
+                        <select id="new-group-visibility" class="w-full px-4 py-3.5 bg-slate-100 rounded-2xl outline-none text-sm border-none focus:ring-2 focus:ring-blue-500">
+                            <option value="private" selected>🔒 Riêng tư (Chỉ thành viên)</option>
+                            <option value="public">🌍 Công khai (Toàn trường)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="p-4 bg-slate-50 flex space-x-3">
+                    <button onclick="closeCreateGroupModal()" class="flex-1 py-4 text-slate-500 font-bold text-sm">HỦY</button>
+                    <button onclick="createNewGroup()" class="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold text-sm shadow-md">TẠO NHÓM</button>
+                </div>
+            </div>
+        </div>
+		<div id="members-modal" class="hidden fixed inset-0 bg-black/60 z-[60] flex items-end justify-center">
+			<div class="bg-white w-full max-w-md rounded-t-3xl flex flex-col max-h-[85vh] modal-animate shadow-2xl">
+				<div class="p-5 border-b flex justify-between items-center sticky top-0 bg-white rounded-t-3xl">
+					<div>
+						<h2 class="font-bold text-lg text-slate-800">Thành viên nhóm</h2>
+						<p id="members-count" class="text-[10px] text-blue-600 font-bold uppercase"></p>
+					</div>
+					<button onclick="closeMembersModal()" class="text-slate-400 p-2 text-xl">✕</button>
+				</div>
+				<div id="members-list-content" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50">
+					</div>
+			</div>
+		</div>
+		
+    </div>
+
+   <form id="goto-chat-form" action="https://mobi.vinhuni.edu.vn/chat-secure" method="POST" class="hidden">
+        <input type="hidden" name="token" value="{{ token }}">
+        <input type="hidden" name="user_id" value="{{ user_id }}">
+        <input type="hidden" name="user_name" value="{{ user_name }}">
+        <input type="hidden" name="ms_token" value="{{ ms_token }}">
+        <input type="hidden" name="group_id" id="target-group-id" value="">
+        <input type="hidden" name="group_name" id="target-group-name" value="">
+        <input type="hidden" name="target_path" value="/chat-secure">
+    </form>
+
+    <script src="/static/js/chat_core.js"></script>
+    <script src="/static/js/chat_actions.js"></script>
+    <script src="/static/js/chat_manager.js"></script>
+
+    <script>
+        // Khởi tạo các biến định danh từ Server VinhUni
+        window.userId = "{{ user_id }}";
+        window.userDisplayName = "{{ user_name }}";
+        window.token = "{{ token }}";
+
+        // Hàm thoát WebView quay về Home của Flutter App
+        function handleBackToApp() {
+            if (window.FlutterChannel) {
+                window.FlutterChannel.postMessage('goBackHome');
+            } else {
+                window.history.back();
+            }
+        }
+
+        // Kích hoạt bộ máy Chat
+        window.onload = () => initApp('GROUPS');
+    </script>
+</body>
+</html>

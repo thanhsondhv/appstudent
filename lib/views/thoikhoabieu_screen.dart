@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import '../services/database_helper.dart'; // 🔥 Dòng quan trọng nhất để sửa lỗi của bạn
+import '../core/api/api.dart';
+import '../core/offline/cached_fetch.dart';
+import '../core/offline/dai_bao_ban_cu.dart';
 
 class ThoiKhoaBieuScreen extends StatefulWidget {
   const ThoiKhoaBieuScreen({super.key});
@@ -16,6 +17,9 @@ class _ThoiKhoaBieuScreenState extends State<ThoiKhoaBieuScreen> {
   List<dynamic> rawFilterData = []; 
   List<dynamic> scheduleData = [];
   bool isLoading = true;
+
+  /// Đúng khi máy chủ không phản hồi và màn hình đang hiển thị dữ liệu đã lưu.
+  bool dangXemBanCu = false;
   String? errorMessage;
 
   List<String> listNamHoc = [];
@@ -66,11 +70,12 @@ class _ThoiKhoaBieuScreenState extends State<ThoiKhoaBieuScreen> {
 
       // B. Gọi mạng âm thầm cập nhật dữ liệu mới
       await _fetchPrograms(currentUserId);
-      final url = 'https://mobi.vinhuni.edu.vn/api/get-filters/$currentUserId';
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
-      
-      if (response.statusCode == 200) {
-        final List<dynamic> newData = json.decode(response.body);
+      final resLoc = await Api.get(
+        '/api/get-filters/$currentUserId',
+        hanCho: const Duration(seconds: 5),
+      );
+      if (resLoc.thanhCong && resLoc.data is List) {
+        final List<dynamic> newData = resLoc.data as List;
         await db.saveScheduleFilters(currentUserId, newData); // Lưu cache SQLite
         _processFilters(newData);
         await _fetchSchedule(currentUserId); // Cập nhật bản mới từ mạng
@@ -103,60 +108,55 @@ class _ThoiKhoaBieuScreenState extends State<ThoiKhoaBieuScreen> {
     String tuan = selectedTuan;
     String prog = selectedProgramId;
 
-    // A. Đọc máy hiện lên trước (Khử xoay)
-    final cached = await db.getSchedule(userId, nam, ky, tuan, prog);
-    if (cached != null) {
-      setState(() {
-        scheduleData = cached;
-        isLoading = false; 
-      });
-    } else if (!useCacheOnly) {
-      setState(() => isLoading = true); 
-    }
-
-    if (useCacheOnly) return;
-
-    // B. Gọi mạng cập nhật
-    try {
-      final url = 'https://mobi.vinhuni.edu.vn/api/get-schedule/$userId?nam_hoc=$nam&hoc_ky=$ky&tuan=$tuan&program_id=$prog';
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 8));
-      
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        await db.saveSchedule(userId, nam, ky, tuan, prog, data); // Lưu cache
-        
-        if (mounted) {
-          setState(() {
-            scheduleData = data;
-            isLoading = false;
-          });
-        }
-      }
-    } catch (e) {
-      if (mounted) setState(() => isLoading = false);
-    }
+    // Sửa 18/08/2026 (Pha 1): dùng chung cachedFetch — xem
+    // lib/core/offline/cached_fetch.dart
+    await cachedFetch<List<dynamic>>(
+      duongDan: '/api/get-schedule/$userId',
+      thamSo: {
+        'nam_hoc': nam,
+        'hoc_ky': ky,
+        'tuan': tuan,
+        'program_id': prog,
+      },
+      hanCho: const Duration(seconds: 8),
+      chiDocTuMay: useCacheOnly,
+      docTuMay: () => db.getSchedule(userId, nam, ky, tuan, prog),
+      ghiVaoMay: (duLieu) => db.saveSchedule(userId, nam, ky, tuan, prog, duLieu),
+      chuyenDoi: (tho) => tho is List ? tho : <dynamic>[],
+      khiCoDuLieu: (kq) {
+        if (!mounted) return;
+        setState(() {
+          scheduleData = kq.duLieu;
+          isLoading = false;
+          dangXemBanCu = kq.dangDungBanCu;
+        });
+      },
+    );
   }
 
   // =========================================================================
   // 3. LOGIC HỖ TRỢ (NGÀNH, BỘ LỌC)
   // =========================================================================
   Future<void> _fetchPrograms(String userId) async {
-    try {
-      final url = 'https://mobi.vinhuni.edu.vn/api/student-programs/$userId'; 
-      final response = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        setState(() {
-          programList = [
-            {"program_id": "ALL", "program_name": "Tất cả ngành học"},
-            ...data.map((e) => {
-              "program_id": e["program_id"].toString(), 
+    final res = await Api.get(
+      '/api/student-programs/$userId',
+      hanCho: const Duration(seconds: 5),
+    );
+    if (!res.thanhCong || res.data is! List) {
+      debugPrint("⚠️ [TKB] Không tải được danh sách ngành: ${res.thongDiepLoi}");
+      return;
+    }
+    final data = res.data as List;
+    if (!mounted) return;
+    setState(() {
+      programList = [
+        {"program_id": "ALL", "program_name": "Tất cả ngành học"},
+        ...data.map((e) => {
+              "program_id": e["program_id"].toString(),
               "program_name": e["program_name"].toString()
             })
-          ];
-        });
-      }
-    } catch (e) { debugPrint("Offline programs: $e"); }
+      ];
+    });
   }
 
   void _updateFilters({bool updateNam = false}) {
@@ -207,6 +207,10 @@ class _ThoiKhoaBieuScreenState extends State<ThoiKhoaBieuScreen> {
       body: Column(
         children: [
           _buildFilterBar(),
+          DaiBaoBanCu(
+            hienThi: dangXemBanCu,
+            khiBamTaiLai: () => _fetchSchedule(currentUserId),
+          ),
           Expanded(
             child: isLoading && scheduleData.isEmpty
                 ? Center(child: CircularProgressIndicator(color: vinhUniBlue))
@@ -397,17 +401,32 @@ class _ThoiKhoaBieuScreenState extends State<ThoiKhoaBieuScreen> {
     if (reason.trim().isEmpty) { _showSnack("Vui lòng nhập lý do!", Colors.orange); return; }
     showDialog(context: context, barrierDismissible: false, builder: (ctx) => const Center(child: CircularProgressIndicator()));
     try {
-      final res = await http.post(
-        Uri.parse("https://mobi.vinhuni.edu.vn/api/student/send-attendance-request"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"student_id": currentUserId, "lhp_code": lhpCode, "category": category, "reason": reason}),
-      ).timeout(const Duration(seconds: 10));
+      final res = await Api.post(
+        "/api/student/send-attendance-request",
+        duLieu: {
+          "student_id": currentUserId,
+          "lhp_code": lhpCode,
+          "category": category,
+          "reason": reason,
+        },
+        hanCho: const Duration(seconds: 10),
+      );
+      if (!mounted) return;
       Navigator.pop(context); // Tắt loading
-      if (res.statusCode == 200) {
+
+      if (res.thanhCong) {
         Navigator.pop(context); // Đóng BottomSheet
         _showSnack("Gửi đơn thành công!", Colors.green);
+      } else {
+        // Sửa 18/08/2026: bản cũ không có nhánh này — máy chủ trả lỗi thì màn
+        // hình im lặng, người dùng tưởng đơn đã gửi đi.
+        _showSnack(res.thongDiepLoi, Colors.red);
       }
-    } catch (e) { Navigator.pop(context); _showSnack("Lỗi kết nối server!", Colors.red); }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
+      _showSnack("Lỗi kết nối máy chủ!", Colors.red);
+    }
   }
 
   // --- HELPERS ---

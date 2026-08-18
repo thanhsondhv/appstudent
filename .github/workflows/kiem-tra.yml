@@ -1,0 +1,146 @@
+name: Kiểm tra
+
+# Chặn lỗi ngay tại chỗ thay vì để lọt lên máy chủ.
+#
+# Ba loại lỗi từng lọt qua trong đợt làm việc ngày 18/08/2026, mà quy trình này
+# sẽ bắt được ngay:
+#   • `fsettings.db...` — cú pháp hợp lệ nên `py_compile` cho qua, nhưng chạy
+#     là NameError ngay dòng đầu và cả tiến trình không khởi động nổi. Có ở 10 tệp.
+#   • Xung đột tên module `database` giữa gói ở gốc và tệp trong notification_system,
+#     làm worker ném ImportError khi khởi động.
+#   • Khoá bí mật viết cứng lọt vào mã nguồn.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:        # cho phép bấm chạy tay từ giao diện GitHub
+
+# Đẩy mã liên tiếp thì huỷ lượt chạy cũ, chỉ giữ lượt mới nhất
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # =========================================================================
+  ung-dung:
+    name: Ứng dụng Flutter
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cài Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.1'
+          channel: stable
+          cache: true
+
+      - name: Tải gói phụ thuộc
+        run: flutter pub get
+
+      - name: Phân tích tĩnh
+        # Ngưỡng hiện tại là 0 LỖI. Cảnh báo và gợi ý vẫn còn khá nhiều
+        # (318 mục tính đến 18/08/2026) nên chưa dùng --fatal-warnings;
+        # khi dọn hết thì siết lại.
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Kiểm thử
+        run: flutter test --reporter compact
+
+      - name: Dựng thử bản Android
+        # Dựng được nghĩa là mã thật sự biên dịch, không chỉ qua phân tích tĩnh.
+        # Chọn Android vì máy ảo Linux của GitHub không dựng được iOS.
+        run: flutter build apk --debug
+
+  # =========================================================================
+  may-chu:
+    name: Máy chủ Python
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cài Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cài gói tối thiểu
+        # Cố ý KHÔNG cài toàn bộ requirements.txt (82 gói, có cả thư viện thị
+        # giác máy tính rất nặng). Bộ kiểm tra được thiết kế để chạy mà không
+        # cần cơ sở dữ liệu hay Firebase — phần nào thiếu thì tự bỏ qua.
+        run: pip install --quiet redis
+
+      - name: Tạo tệp cấu hình giả
+        # core/settings.py cố tình dừng chương trình khi thiếu khoá bắt buộc.
+        # Trong CI thì dùng giá trị giả — không kết nối đi đâu cả.
+        run: |
+          cat > backendappsv/.env <<'EOF'
+          APP_ENV=ci
+          DB_SERVER=ci-khong-ket-noi
+          DB_USER=ci
+          DB_PASSWORD=ci
+          DB_NAME=ci
+          MS_CLIENT_ID=ci
+          MS_CLIENT_SECRET=ci
+          MS_TENANT_ID=ci
+          SESSION_SECRET_KEY=ci-khong-dung-that
+          JWT_SECRET_KEY=ci-khong-dung-that
+          EOF
+
+      - name: Chạy toàn bộ kiểm tra
+        working-directory: backendappsv
+        run: bash tests/chay_tat_ca.sh
+
+  # =========================================================================
+  bao-mat:
+    name: Rà khoá bí mật
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # cần toàn bộ lịch sử để quét được các commit cũ
+
+      - name: Quét khoá trong mã nguồn
+        run: |
+          echo "Đang quét khoá bí mật viết cứng…"
+          MAU='sk-proj-[A-Za-z0-9]|sk-[A-Za-z0-9]{40,}|AIza[0-9A-Za-z_-]{35}'
+          MAU="$MAU|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+          MAU="$MAU|PWD=[^;\"'\'' ]{6,}"
+          if grep -rEn "$MAU" --include='*.py' --include='*.dart' --include='*.json' \
+               --include='*.yaml' --include='*.yml' . 2>/dev/null \
+               | grep -v node_modules | grep -v '_luu_tru' | grep -v '\.example'; then
+            echo "::error::Phát hiện khoá bí mật trong mã nguồn"
+            exit 1
+          fi
+          echo "✅ Không có khoá nào trong mã nguồn"
+
+      - name: Kiểm tra tệp nhạy cảm không bị commit
+        run: |
+          LOI=0
+          for MAU in '*firebase-adminsdk*.json' 'appsettings.json' '*.pem' '*.pfx' '.env'; do
+            FOUND=$(git ls-files "$MAU" 2>/dev/null || true)
+            if [ -n "$FOUND" ]; then
+              echo "::error::Tệp nhạy cảm đã bị commit: $FOUND"
+              LOI=1
+            fi
+          done
+          [ "$LOI" -eq 0 ] && echo "✅ Không có tệp nhạy cảm nào trong git"
+          exit $LOI

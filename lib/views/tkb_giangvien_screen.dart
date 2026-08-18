@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../core/api/api.dart';
+import '../core/auth/session.dart';
 
 class TkbGiangVienScreen extends StatefulWidget {
   const TkbGiangVienScreen({super.key});
@@ -12,6 +11,10 @@ class TkbGiangVienScreen extends StatefulWidget {
 
 class _TkbGiangVienScreenState extends State<TkbGiangVienScreen> {
   final Color vinhUniBlue = const Color(0xFF0054A6);
+
+  /// Mã giảng viên theo định dạng máy chủ yêu cầu (có tiền tố CB).
+  /// Khai báo một chỗ để nếu máy chủ đổi quy ước thì chỉ sửa ở đây.
+  String get _maGiangVien => 'CB$_userId';
 
   // --- 1. BIẾN DỮ LIỆU BỘ LỌC ---
   List<dynamic> _rawFilters = [];
@@ -40,13 +43,17 @@ class _TkbGiangVienScreenState extends State<TkbGiangVienScreen> {
   Future<void> _loadInitialData() async {
     setState(() => _isLoading = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      _userId = (prefs.getString('user_code') ?? "").toUpperCase().replaceAll("CB", "");
+      // Sửa 18/08/2026 (Pha 1): trước đây dùng
+      //     prefs.getString('user_code').replaceAll("CB", "")
+      // replaceAll xoá chuỗi "CB" ở MỌI vị trí, không chỉ tiền tố — mã cán bộ
+      // nào chứa "CB" ở giữa sẽ bị cắt sai. Session.userCode đã trả về mã đã
+      // chuẩn hoá sẵn nên không phải tự xử lý nữa.
+      _userId = await Session.userCode;
 
       // 1. Tải bộ lọc từ API
-      final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/get-filters/$_userId"));
-      if (res.statusCode == 200) {
-        _rawFilters = jsonDecode(res.body);
+      final res = await Api.get("/api/get-filters/$_userId");
+      if (res.thanhCong) {
+        _rawFilters = res.data is List ? res.data as List : [];
 
         // 2. Lấy danh sách Năm học
         _years = _rawFilters.map((e) => e['nam'].toString()).toSet().toList()..sort((a, b) => b.compareTo(a));
@@ -111,23 +118,38 @@ class _TkbGiangVienScreenState extends State<TkbGiangVienScreen> {
 
     setState(() => _isLoading = true);
     try {
-      final url = "https://mobi.vinhuni.edu.vn/api/lecturer/schedule-v4/CB$_userId"
-          "?nam=$_selectedYear"
-          "&ky=${Uri.encodeComponent(_selectedSemester!)}"
-          "&tuan=$_selectedWeek";
+      // Máy chủ nhận mã giảng viên có tiền tố CB. Ghép ở đúng một chỗ này
+      // thay vì cắt ra rồi ghép lại như trước.
+      final res = await Api.get(
+        "/api/lecturer/schedule-v4/$_maGiangVien",
+        thamSo: {
+          "nam": _selectedYear,
+          "ky": _selectedSemester,
+          "tuan": _selectedWeek,
+        },
+      );
 
-      final res = await http.get(Uri.parse(url));
-      final result = jsonDecode(res.body);
+      if (!res.thanhCong) {
+        debugPrint("❌ [TKB GV] ${res.thongDiepLoi}");
+        if (mounted) {
+          setState(() => _schedule = []);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(res.thongDiepLoi), backgroundColor: Colors.orange),
+          );
+        }
+        return;
+      }
 
-      if (result['status'] == 'success') {
-        setState(() => _schedule = result['data']);
+      final result = res.data;
+      if (result is Map && result['status'] == 'success') {
+        setState(() => _schedule = result['data'] as List? ?? []);
       } else {
         setState(() => _schedule = []);
       }
     } catch (e) {
       debugPrint("❌ Lỗi Fetch TKB: $e");
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 

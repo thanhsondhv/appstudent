@@ -26,3 +26,22 @@ linter:
 
 # Additional information about this file can be found at
 # https://dart.dev/guides/language/analysis-options
+
+# =============================================================
+# Bỏ qua các thư mục KHÔNG phải mã nguồn đang chạy.
+# Thêm 18/08/2026 (Pha 0): trước đó analyzer quét cả thư mục sao lưu
+# và mã thử nghiệm, tạo ra 915 trong tổng số 1.293 cảnh báo — làm
+# lu mờ các lỗi thật trong lib/.
+# =============================================================
+analyzer:
+  exclude:
+    - "untitled folder/**"      # bản sao lưu cũ, không thuộc dự án
+    - "lib/Test/**"             # bản chép cũ của home_screen, import sai đường dẫn
+    - "build/**"
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+  errors:
+    # Nâng các lỗi bảo mật và đúng đắn lên mức chặn, không cho bỏ qua
+    use_build_context_synchronously: warning
+    unused_import: warning
+    dead_code: warning

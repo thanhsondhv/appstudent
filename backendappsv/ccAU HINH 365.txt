@@ -1,0 +1,21 @@
+Android (android/app/src/main/AndroidManifest.xml): Thêm đoạn sau vào bên trong thẻ <activity> chính:
+
+XML
+<intent-filter>
+    <action android:name="android.intent.action.VIEW" />
+    <category android:name="android.intent.category.DEFAULT" />
+    <category android:name="android.intent.category.BROWSABLE" />
+    <data android:scheme="vinhuni-app" android:host="login_success" />
+</intent-filter>
+iOS (ios/Runner/Info.plist):
+
+XML
+<key>CFBundleURLTypes</key>
+<array>
+    <dict>
+        <key>CFBundleURLSchemes</key>
+        <array>
+            <string>vinhuni-app</string>
+        </array>
+    </dict>
+</arra

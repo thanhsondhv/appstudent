@@ -1,8 +1,7 @@
 // mo_diem_danh_screen.dart
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
 import 'live_attendance_screen.dart'; 
+import '../core/api/api.dart';
 
 class MoDiemDanhScreen extends StatefulWidget {
   final String lecturerId;
@@ -26,9 +25,9 @@ class _MoDiemDanhScreenState extends State<MoDiemDanhScreen> {
   void initState() { super.initState(); _loadAllFilters(); }
 
   Future<void> _loadAllFilters() async {
-    final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/get-filters/${widget.lecturerId}"));
-    if (res.statusCode == 200) {
-      final List<dynamic> data = jsonDecode(res.body);
+    final res = await Api.get("/api/get-filters/${widget.lecturerId}");
+    if (res.thanhCong) {
+      final List<dynamic> data = res.data is List ? res.data as List : const [];
       setState(() {
         _filters = data;
         _years = data.map((e) => e['nam'].toString()).toSet().toList()..sort((a, b) => b.compareTo(a));
@@ -49,10 +48,13 @@ class _MoDiemDanhScreenState extends State<MoDiemDanhScreen> {
   Future<void> _fetchClasses() async {
     if (_selectedYear == null || _selectedSemester == null) return;
     setState(() => _isClassLoading = true);
-    final url = "https://mobi.vinhuni.edu.vn/api/lecturer/classes-filtered?lecturer_id=${widget.lecturerId}&nam=$_selectedYear&ky=${Uri.encodeComponent(_selectedSemester!)}";
-    final res = await http.get(Uri.parse(url));
-    final data = jsonDecode(res.body);
-    if (data['status'] == 'success') {
+    final res = await Api.get("/api/lecturer/classes-filtered", thamSo: {
+      "lecturer_id": widget.lecturerId,
+      "nam": _selectedYear,
+      "ky": _selectedSemester,
+    });
+    final data = res.data is Map ? res.data as Map : const {};
+    if (res.thanhCong && data['status'] == 'success') {
       setState(() {
         _classList = data['data'];
         _selectedLhp = _classList.isNotEmpty ? _classList[0]['ma_lop'] : null;
@@ -63,9 +65,9 @@ class _MoDiemDanhScreenState extends State<MoDiemDanhScreen> {
   }
 
   Future<void> _fetchSessions(String lhpCode) async {
-    final res = await http.get(Uri.parse("https://mobi.vinhuni.edu.vn/api/attendance/sessions-by-class/${Uri.encodeComponent(lhpCode)}"));
-    if (res.statusCode == 200) setState(() { 
-      _existingSessions = jsonDecode(res.body);
+    final res = await Api.get("/api/attendance/sessions-by-class/${Uri.encodeComponent(lhpCode)}");
+    if (res.thanhCong) setState(() {
+      _existingSessions = res.data is List ? res.data as List : const [];
       _selectedBuoiId = _existingSessions.isNotEmpty ? _existingSessions[0]['id'] : null;
     });
   }
@@ -73,20 +75,41 @@ class _MoDiemDanhScreenState extends State<MoDiemDanhScreen> {
   Future<void> _handleCreateNewSession() async {
     if (_selectedLhp == null) return;
     setState(() => _isLoading = true);
-    final res = await http.post(Uri.parse("https://mobi.vinhuni.edu.vn/api/attendance/create-session"),
-      headers: {"Content-Type": "application/json"},
-      body: jsonEncode({
-        "lhp_code": _selectedLhp, "lecturer_id": widget.lecturerId,
+    final res = await Api.post(
+      "/api/attendance/create-session",
+      duLieu: {
+        "lhp_code": _selectedLhp,
+        "lecturer_id": widget.lecturerId,
         "ngay_hoc": "${_selectedDate.year}-${_selectedDate.month}-${_selectedDate.day}",
-        "duration": 20, "lat": 18.659, "lon": 105.695,
-      }));
-    final data = jsonDecode(res.body);
-    if (data['status'] == 'success') {
+        "duration": 20,
+        // ⚠️ Toạ độ cố định của cơ sở chính. Mọi buổi điểm danh đều dùng chung
+        // toạ độ này bất kể lớp học ở toà nhà nào — cần lấy theo phòng học thật
+        // khi triển khai điểm danh theo vị trí (xem Pha 7, bản đồ trong nhà).
+        "lat": 18.659,
+        "lon": 105.695,
+      },
+    );
+    if (!mounted) return;
+
+    final data = res.data is Map ? res.data as Map : const {};
+    if (res.thanhCong && data['status'] == 'success') {
       await _fetchSessions(_selectedLhp!);
+      if (!mounted) return;
       setState(() => _selectedBuoiId = data['buoi_hoc_id']);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ Đã tạo buổi mới thành công!")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("✅ Đã tạo buổi mới thành công!")),
+      );
+    } else {
+      // Không báo lỗi thì giảng viên tưởng đã mở phiên điểm danh, sinh viên
+      // đứng quét mã mà không có phiên nào để quét.
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(data['message']?.toString() ?? res.thongDiepLoi),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
-    setState(() => _isLoading = false);
+    if (mounted) setState(() => _isLoading = false);
   }
 
   @override
