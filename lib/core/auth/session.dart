@@ -113,9 +113,9 @@ class Session {
   static UserRole get roleSync =>
       _cachedRole ??= UserRole.parse(_prefs?.getString(_kRole));
 
-  static Future<String?> get accessToken => _secure.read(key: _kAccessToken);
-  static Future<String?> get refreshToken => _secure.read(key: _kRefreshToken);
-  static Future<String?> get firebaseChatToken => _secure.read(key: _kFirebaseChatToken);
+  static Future<String?> get accessToken => _docBaoMat(_kAccessToken);
+  static Future<String?> get refreshToken => _docBaoMat(_kRefreshToken);
+  static Future<String?> get firebaseChatToken => _docBaoMat(_kFirebaseChatToken);
 
   /// Token Microsoft, tự trả `null` nếu đã hết hạn — bên gọi không phải tự kiểm tra.
   static Future<String?> get msAccessToken async {
@@ -136,6 +136,7 @@ class Session {
   /// `LoginHandler.executeSuccessfulLogin` — trước đây hai hàm này làm gần
   /// giống nhau nhưng khác ở vài chỗ, gây ra phiên không nhất quán.
   static Future<void> save(Map<String, dynamic> data) async {
+    debugPrint("🔐 [Session] Bắt đầu lưu phiên…");
     final prefs = await _p;
 
     // Mã người dùng: máy chủ trả về nhiều tên khoá khác nhau tuỳ endpoint
@@ -186,11 +187,55 @@ class Session {
     );
   }
 
+  /// Khoá đánh dấu một giá trị đã phải ghi tạm ra nơi không mã hoá.
+  static String _khoaDuPhong(String key) => '${key}__du_phong';
+
   static Future<void> _writeSecure(String key, dynamic value) async {
     final str = value?.toString();
-    if (str != null && str.isNotEmpty) {
+    if (str == null || str.isEmpty) return;
+
+    try {
       await _secure.write(key: key, value: str);
+      // Ghi được vào kho mã hoá thì dọn bản tạm của lần hỏng trước
+      final prefs = await _p;
+      if (prefs.containsKey(_khoaDuPhong(key))) {
+        await prefs.remove(_khoaDuPhong(key));
+      }
+    } catch (e) {
+      // ⚠️ SỬA 18/08/2026 — nguyên nhân "đăng nhập đúng mà báo sai mật khẩu".
+      //
+      // Kho mã hoá (Keychain trên iOS, EncryptedSharedPreferences trên Android)
+      // có thể từ chối ghi: thiếu entitlement, máy chưa mở khoá lần nào, hoặc
+      // Keychain hỏng sau khi cài lại. Trước đây lỗi đó ném thẳng ra ngoài, phá
+      // vỡ cả Session.save, rơi vào catch của AuthService.login, hàm này trả
+      // null — và giao diện kết luận "Tài khoản hoặc mật khẩu không chính xác",
+      // dù máy chủ đã ghi "ĐĂNG NHẬP OK".
+      //
+      // Nay: ghi tạm ra SharedPreferences để người dùng vào được ứng dụng, và
+      // nói rõ trong nhật ký. Đây là mức bảo vệ THẤP HƠN — bằng đúng cách app
+      // lưu token trước Pha 1 — nên chỉ dùng khi kho mã hoá thật sự không dùng
+      // được, và tự dọn ngay khi ghi mã hoá lại thành công.
+      debugPrint("⚠️ [Session] Kho mã hoá từ chối ghi '$key': $e");
+      debugPrint("   → Lưu tạm ở nơi không mã hoá để đăng nhập không bị chặn.");
+      try {
+        final prefs = await _p;
+        await prefs.setString(_khoaDuPhong(key), str);
+      } catch (e2) {
+        debugPrint("❌ [Session] Cả bản lưu tạm cũng hỏng: $e2");
+      }
     }
+  }
+
+  /// Đọc giá trị nhạy cảm: kho mã hoá trước, bản lưu tạm sau.
+  static Future<String?> _docBaoMat(String key) async {
+    try {
+      final gt = await _secure.read(key: key);
+      if (gt != null && gt.isNotEmpty) return gt;
+    } catch (e) {
+      debugPrint("⚠️ [Session] Không đọc được '$key' từ kho mã hoá: $e");
+    }
+    final prefs = await _p;
+    return prefs.getString(_khoaDuPhong(key));
   }
 
   /// Xoá sạch phiên khi đăng xuất hoặc khi máy chủ báo token không còn hợp lệ.

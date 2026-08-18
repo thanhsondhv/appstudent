@@ -44,8 +44,19 @@ class AuthService {
       }
 
       if (response.statusCode == 200 && noiDung?['status'] == 'success') {
-        await _saveUserSession(noiDung!['data']);
-        return noiDung['data'];
+        debugPrint("🔑 [Login] Máy chủ xác thực THÀNH CÔNG, đang lưu phiên…");
+        try {
+          await _saveUserSession(noiDung!['data']);
+        } catch (e, dauVet) {
+          // Tách bạch "máy chủ từ chối" với "máy chủ đồng ý nhưng máy không lưu
+          // được phiên". Gộp hai thứ này lại chính là lý do trước đây màn hình
+          // báo sai mật khẩu trong khi mật khẩu đúng.
+          debugPrint("❌ [Login] Máy chủ đồng ý nhưng KHÔNG lưu được phiên: $e\n$dauVet");
+          thongDiepLoiCuoi = 'Đăng nhập đúng nhưng máy không lưu được phiên: $e';
+          return null;
+        }
+        debugPrint("✅ [Login] Đã lưu phiên xong.");
+        return noiDung!['data'];
       }
 
       final tuMayChu = noiDung?['message']?.toString().trim();

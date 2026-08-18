@@ -1,3 +1,4 @@
+import 'dart:async';
 //login_screen.dart
 import 'package:flutter/material.dart';
 import '../core/api/may_chu.dart';
@@ -91,14 +92,29 @@ class _LogInWidgetState extends State<LogInWidget> with SingleTickerProviderStat
     final userData = await _authService.login(emailController.text.trim(), passwordController.text.trim());
     
     if (userData != null) {
+      debugPrint("➡️ [Login] Vào bước sau đăng nhập…");
       await _saveAccountInfo();
+      debugPrint("➡️ [Login] Đã lưu thông tin tài khoản trên máy.");
       String rawUserCode = userData['user_code']?.toString() ?? userData['student_id']?.toString() ?? "";
       String numericId = rawUserCode.replaceAll(RegExp(r'[^0-9]'), '');
       String loginUserName = emailController.text.trim();
       
-      // 🔥 CHÌA KHÓA FIX LỖI: Thêm await để ép App chờ nạp xong mã OneDrive từ Server Python về máy
-      // Đảm bảo khi vào đến màn hình bên trong, máy đã có sẵn Token và Hạn dùng
-      await OneDriveService().syncTokenOnAppLaunch(numericId);
+      // Nạp sẵn liên kết OneDrive trước khi vào trong, để màn hình bên trong đã
+      // có Token và hạn dùng.
+      //
+      // ⚠️ SỬA 18/08/2026: bước này gọi sang Microsoft qua máy chủ, và hạn chờ
+      // nhận của client là 120 giây. Khi Microsoft chậm hoặc mạng chặn, người
+      // dùng đứng ở màn đăng nhập hai phút sau khi ĐÃ xác thực thành công, mà
+      // không có gì hiện lên. OneDrive là chức năng phụ — không đáng chặn cả
+      // lần đăng nhập. Nay chờ tối đa 8 giây rồi đi tiếp; nếu chưa xong thì
+      // màn hình OneDrive tự nạp lại khi người dùng mở tới.
+      try {
+        await OneDriveService()
+            .syncTokenOnAppLaunch(numericId)
+            .timeout(const Duration(seconds: 8));
+      } catch (e) {
+        debugPrint("⚠️ Chưa nạp sẵn được liên kết OneDrive (bỏ qua, vào tiếp): $e");
+      }
 
       if (mounted) setState(() => _isLoading = false);
 

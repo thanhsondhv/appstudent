@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../core/api/may_chu.dart';
 import '../core/auth/session.dart';
@@ -62,8 +63,15 @@ class LoginHandler {
     } catch (e) { debugPrint("❌ Lỗi Handshake: $e"); }
   }
 
-  /// Hàm lưu dữ liệu tổng thể vào máy
-  static Future<void> executeSuccessfulLogin(
+  /// Lưu phiên rồi chuyển vào màn hình chính. Trả `false` nếu không vào được.
+  ///
+  /// ⚠️ SỬA 18/08/2026: bản cũ bắt mọi ngoại lệ rồi chỉ `debugPrint`. Hệ quả:
+  /// máy chủ xác thực THÀNH CÔNG, nhưng nếu bước lưu phiên hay bước điều hướng
+  /// hỏng thì người dùng đứng nguyên ở màn đăng nhập, không một dòng thông báo.
+  /// Nhìn từ phía người dùng thì y hệt "sai mật khẩu" — trong khi mật khẩu đúng.
+  /// Đã gặp thật: nhật ký máy chủ ghi "SINH VIÊN OK" ba lần liên tiếp mà ứng
+  /// dụng không vào được lần nào.
+  static Future<bool> executeSuccessfulLogin(
       BuildContext context, String userId, String fullName, 
       {String? role, String? accessToken, String? msAccessToken}) async { 
     try {
@@ -87,17 +95,39 @@ class LoginHandler {
       // Đồng bộ thông báo
       NotificationService.syncTokenToServer(cleanId);
       
+      // Đăng ký nhận tin theo chủ đề. Phải có hạn chờ: khi không với tới được
+      // fcmtoken.googleapis.com (mạng trường chặn, hoặc VPN định tuyến hết lưu
+      // lượng), lời gọi này TREO chứ không ném lỗi — nhật ký máy ảo ghi nhận
+      // 240 giây mới bỏ cuộc. Không có hạn chờ thì người dùng đứng ở màn đăng
+      // nhập suốt bốn phút mà không hiểu vì sao.
+      //
+      // Đây là việc phụ: không đăng ký được thì vẫn vào ứng dụng bình thường,
+      // chỉ là chưa nhận tin theo chủ đề cho tới lần mở sau.
       try {
-        await FirebaseMessaging.instance.subscribeToTopic("vinhuni_all_users");
-      } catch (e) { debugPrint("⚠️ Firebase Error: $e"); }
+        await FirebaseMessaging.instance
+            .subscribeToTopic("vinhuni_all_users")
+            .timeout(const Duration(seconds: 5));
+      } catch (e) {
+        debugPrint("⚠️ Chưa đăng ký được chủ đề thông báo (bỏ qua): $e");
+      }
 
       await Future.delayed(const Duration(milliseconds: 200));
 
+      if (!context.mounted) return false;
+      Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+      return true;
+    } catch (e, dauVet) {
+      debugPrint("❌ Lỗi LoginHandler: $e\n$dauVet");
       if (context.mounted) {
-        Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Đăng nhập đúng nhưng không mở được ứng dụng: $e"),
+            backgroundColor: const Color(0xFFB3261E),
+            duration: const Duration(seconds: 8),
+          ),
+        );
       }
-    } catch (e) {
-      debugPrint("❌ Lỗi LoginHandler: $e");
+      return false;
     }
   }
 
