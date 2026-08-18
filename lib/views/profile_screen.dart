@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/api/may_chu.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -336,7 +337,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     decoration: BoxDecoration(color: vinhUniBlue.withOpacity(0.1), shape: BoxShape.circle),
                     child: ClipOval(
                       child: Image.network(
-                        "https://mobi.vinhuni.edu.vn/api/get-avatar/$studentId?v=$_imageVersion",
+                        "${MayChu.diaChi}/api/get-avatar/$studentId?v=$_imageVersion",
                         fit: BoxFit.cover,
                         errorBuilder: (c, e, s) => Icon(Icons.person, size: 40, color: vinhUniBlue),
                       ),

@@ -1,5 +1,6 @@
 //homehome_screen.dart
 import 'package:flutter/material.dart';
+import '../core/api/may_chu.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -133,7 +134,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final response = await http.get(
-        Uri.parse('https://mobi.vinhuni.edu.vn/api/app-menu'),
+        Uri.parse('${MayChu.diaChi}/api/app-menu'),
         headers: {
           "Content-Type": "application/json",
           "Authorization": "Bearer $token", 
@@ -168,7 +169,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       PackageInfo packageInfo = await PackageInfo.fromPlatform();
       String currentVer = "${packageInfo.version}+${packageInfo.buildNumber}";
-      final response = await http.get(Uri.parse('https://mobi.vinhuni.edu.vn/api/check-version'));
+      final response = await http.get(Uri.parse('${MayChu.diaChi}/api/check-version'));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         Map<String, dynamic> platformData = Platform.isAndroid ? data['android'] : data['ios'];
@@ -231,7 +232,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _submitAttendance(String code, {double? lat, double? lon, bool isBiometric = false}) async {
     setState(() => _isLoading = true);
     try {
-      final response = await http.post(Uri.parse("https://mobi.vinhuni.edu.vn/api/attendance/submit"), headers: {"Content-Type": "application/json"}, body: jsonEncode({"student_id": studentId, "code": code, "lat": lat ?? 0.0, "lon": lon ?? 0.0, "is_biometric_valid": isBiometric}));
+      final response = await http.post(Uri.parse("${MayChu.diaChi}/api/attendance/submit"), headers: {"Content-Type": "application/json"}, body: jsonEncode({"student_id": studentId, "code": code, "lat": lat ?? 0.0, "lon": lon ?? 0.0, "is_biometric_valid": isBiometric}));
       final resData = jsonDecode(response.body);
       if (resData['status'] == 'success') { _showSuccessDialog("✅ Điểm danh thành công!"); }
       else { _showSnackBar(resData['message'] ?? "Lỗi điểm danh", Colors.red); }
@@ -250,7 +251,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _fetchUnreadCount() async {
     if (studentId.isEmpty) return;
     try {
-      final response = await http.get(Uri.parse('https://mobi.vinhuni.edu.vn/api/count-unread/$studentId'));
+      final response = await http.get(Uri.parse('${MayChu.diaChi}/api/count-unread/$studentId'));
       if (response.statusCode == 200 && mounted) {
         final data = json.decode(response.body);
         setState(() => _unreadCount = data['unread_count'] ?? 0);
@@ -277,7 +278,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // 2. CẬP NHẬT DỮ LIỆU MỚI: Gọi API với Timeout 15 giây
       // Tăng từ 5s lên 15s giúp tránh lỗi "Future not completed" khi server trường quá tải
       final response = await http.get(
-        Uri.parse('https://mobi.vinhuni.edu.vn/api/student-info/$id'),
+        Uri.parse('${MayChu.diaChi}/api/student-info/$id'),
       ).timeout(const Duration(seconds: 120)); 
 
       if (response.statusCode == 200) {
@@ -311,7 +312,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    String avatarUrl = 'https://mobi.vinhuni.edu.vn/api/get-avatar/?student_id=$studentId&v=$_avatarVersion';
+    String avatarUrl = '${MayChu.diaChi}/api/get-avatar/?student_id=$studentId&v=$_avatarVersion';
     final List<Widget> screens = [
       HomeContent(
         studentName: studentName, studentId: studentId, userRole: userRole, faculty: userFaculty, 

@@ -132,7 +132,27 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
 from core.settings import settings                # noqa: E402
 
-app = FastAPI(title="VinhUni — máy chủ thử cục bộ", docs_url="/docs")
+# Ưu tiên dùng THẲNG app thật của Main.py.
+#
+# ⚠️ SỬA 18/08/2026: bản trước tạo một FastAPI riêng rồi sao chép danh sách
+# tuyến đường từ Main.app sang. Tuyến đường thì có, nhưng MIDDLEWARE thì không —
+# và Main.py cài SessionMiddleware cho luồng đăng nhập Microsoft. Hệ quả:
+# /login/microsoft ném "SessionMiddleware must be installed", trông y như một
+# lỗi của sản phẩm trong khi đó là lỗi của chính bộ khung thử này.
+_LOI_NAP: list[str] = []
+
+try:
+    import Main as _Main
+    app = _Main.app
+    _DUNG_MAIN = True
+    print(f"  ✅ Dùng trọn app của Main.py — {len(app.routes)} tuyến đường, "
+          f"giữ nguyên middleware")
+except Exception as exc:  # noqa: BLE001
+    _DUNG_MAIN = False
+    _LOI_NAP.append(f"Main.py: {type(exc).__name__}: {str(exc)[:130]}")
+    print(f"  ⚠️  Không nạp được Main.py — {type(exc).__name__}: {str(exc)[:130]}")
+    print("      Lùi về chế độ tối giản: chỉ luồng thông báo, KHÔNG đăng nhập được.")
+    app = FastAPI(title="VinhUni — máy chủ thử cục bộ", docs_url="/docs")
 
 # Máy ảo iOS gọi qua IP máy Mac nên không cùng gốc — mở CORS cho môi trường thử.
 app.add_middleware(
@@ -140,11 +160,6 @@ app.add_middleware(
     allow_origins=["*"], allow_credentials=True,
     allow_methods=["*"], allow_headers=["*"],
 )
-
-
-@app.get("/health")
-async def health():
-    return {"status": "ok", "che_do": "thu-cuc-bo", "csdl": settings.db.safe_repr}
 
 
 def _ip_lan() -> str:
@@ -158,26 +173,6 @@ def _ip_lan() -> str:
     finally:
         s.close()
 
-
-_LOI_NAP: list[str] = []
-
-# Ưu tiên nạp NGUYÊN app thật từ Main.py — như vậy máy chủ thử giống bản chạy
-# trên server nhất, gồm cả /api/login mà ứng dụng cần để đăng nhập.
-#
-# Nếu máy lập trình thiếu thư viện nào đó thì lùi về chế độ tối giản: chỉ nạp
-# router thông báo. Vẫn kiểm được luồng thông báo, chỉ là không đăng nhập được.
-_DUNG_MAIN = False
-try:
-    import Main as _Main
-    for r in _Main.app.routes:
-        if r not in app.routes:
-            app.routes.append(r)
-    _DUNG_MAIN = True
-    print(f"  ✅ Đã nạp trọn Main.py — {len(_Main.app.routes)} tuyến đường")
-except Exception as exc:  # noqa: BLE001
-    _LOI_NAP.append(f"Main.py: {type(exc).__name__}: {str(exc)[:130]}")
-    print(f"  ⚠️  Không nạp được Main.py — {type(exc).__name__}: {str(exc)[:130]}")
-    print("      Lùi về chế độ tối giản: chỉ luồng thông báo, KHÔNG đăng nhập được.")
 
 if not _DUNG_MAIN:
     # Các router TỰ KHAI BÁO tiền tố /api của chúng (APIRouter(prefix="/api")),
@@ -193,6 +188,13 @@ if not _DUNG_MAIN:
         except Exception as exc:  # noqa: BLE001
             _LOI_NAP.append(f"{ten_hien}: {type(exc).__name__}: {str(exc)[:100]}")
             print(f"  ⚠️  Bỏ qua {ten_hien} — {type(exc).__name__}: {str(exc)[:100]}")
+
+
+@app.get("/kiem-tra-cuc-bo")
+async def kiem_tra_cuc_bo():
+    """Điểm kiểm tra riêng của máy chủ thử — không đụng /health của Main.py."""
+    return {"status": "ok", "che_do": "thu-cuc-bo", "csdl": settings.db.safe_repr,
+            "dung_main": _DUNG_MAIN}
 
 
 if __name__ == "__main__":

@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import '../core/api/may_chu.dart';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
@@ -8,11 +10,24 @@ import 'package:local_auth_android/local_auth_android.dart';
 import 'package:local_auth_ios/local_auth_ios.dart';
 
 class AuthService {
-  static const String baseUrl = 'https://mobi.vinhuni.edu.vn';
+  // Không dùng `const` được vì địa chỉ máy chủ đọc từ MayChu lúc chạy
+  static String get baseUrl => MayChu.diaChi;
   final LocalAuthentication _localAuth = LocalAuthentication();
+
+  /// Vì sao đăng nhập vừa rồi không thành công.
+  ///
+  /// ⚠️ SỬA 18/08/2026: [login] trả `null` cho MỌI trường hợp hỏng, nên giao
+  /// diện luôn hiện "Tài khoản hoặc mật khẩu không chính xác" — kể cả khi máy
+  /// chủ sập, mất mạng, hay cơ sở dữ liệu xác thực cán bộ không với tới được.
+  ///
+  /// Người dùng gõ lại mật khẩu hàng chục lần trong khi nguyên nhân nằm chỗ
+  /// khác. Đã gặp thật khi CSDL cán bộ (172.16.0.26) không kết nối được: máy
+  /// chủ trả 500 mà màn hình vẫn báo sai mật khẩu.
+  static String thongDiepLoiCuoi = '';
 
   // --- 1. ĐĂNG NHẬP BẰNG MẬT KHẨU ---
   Future<Map<String, dynamic>?> login(String user, String pass) async {
+    thongDiepLoiCuoi = '';
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/api/login'),
@@ -20,16 +35,44 @@ class AuthService {
         body: jsonEncode({'username': user.trim(), 'password': pass.trim()}),
       ).timeout(const Duration(seconds: 15));
 
-      if (response.statusCode == 200) {
-        final jsonResponse = jsonDecode(response.body);
-        if (jsonResponse['status'] == 'success') {
-          await _saveUserSession(jsonResponse['data']);
-          return jsonResponse['data'];
-        }
+      Map<String, dynamic>? noiDung;
+      try {
+        final giaiMa = jsonDecode(utf8.decode(response.bodyBytes));
+        if (giaiMa is Map<String, dynamic>) noiDung = giaiMa;
+      } catch (_) {
+        // Máy chủ trả về thứ không phải JSON — xử lý theo mã trạng thái bên dưới
       }
+
+      if (response.statusCode == 200 && noiDung?['status'] == 'success') {
+        await _saveUserSession(noiDung!['data']);
+        return noiDung['data'];
+      }
+
+      final tuMayChu = noiDung?['message']?.toString().trim();
+      thongDiepLoiCuoi = switch (response.statusCode) {
+        401 => tuMayChu?.isNotEmpty == true
+            ? tuMayChu!
+            : 'Tài khoản hoặc mật khẩu không chính xác.',
+        403 => tuMayChu?.isNotEmpty == true
+            ? tuMayChu!
+            : 'Tài khoản chưa được phép sử dụng ứng dụng.',
+        429 => 'Bạn thử quá nhiều lần. Vui lòng đợi ít phút rồi thử lại.',
+        >= 500 => 'Máy chủ đang gặp sự cố, không phải do mật khẩu của bạn. '
+            'Vui lòng thử lại sau ít phút.',
+        _ => tuMayChu?.isNotEmpty == true
+            ? tuMayChu!
+            : 'Đăng nhập không thành công (mã ${response.statusCode}).',
+      };
+      return null;
+    } on TimeoutException {
+      thongDiepLoiCuoi = 'Máy chủ phản hồi chậm. Kiểm tra kết nối mạng rồi thử lại.';
+      return null;
+    } on SocketException {
+      thongDiepLoiCuoi = 'Không có kết nối mạng. Kiểm tra Wi-Fi hoặc dữ liệu di động.';
       return null;
     } catch (e) {
       debugPrint("🔥 Lỗi login: $e");
+      thongDiepLoiCuoi = 'Không kết nối được máy chủ. Vui lòng thử lại.';
       return null;
     }
   }

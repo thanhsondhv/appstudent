@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/api/may_chu.dart';
 import '../core/auth/session.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -15,7 +16,7 @@ class LoginHandler {
   static Future<void> verifySessionAndLogin(BuildContext context, String sessionToken) async {
     try {
       final response = await http.post(
-        Uri.parse('https://mobi.vinhuni.edu.vn/api/auth/verify-session'),
+        Uri.parse('${MayChu.diaChi}/api/auth/verify-session'),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({"session_token": sessionToken}),
       );

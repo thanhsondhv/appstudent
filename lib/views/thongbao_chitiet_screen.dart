@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/api/may_chu.dart';
 import 'package:flutter_widget_from_html_core/flutter_widget_from_html_core.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:share_plus/share_plus.dart';
@@ -166,7 +167,7 @@ class _ChiTietThongBaoScreenState extends State<ChiTietThongBaoScreen> {
         onPressed: () => Navigator.push(
           context, 
           MaterialPageRoute(builder: (context) => PdfViewerPage(
-            url: "https://mobi.vinhuni.edu.vn/uploads/docs/$fileName", 
+            url: "${MayChu.diaChi}/uploads/docs/$fileName", 
             title: title
           ))
         ),

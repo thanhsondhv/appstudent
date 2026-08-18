@@ -1,5 +1,6 @@
 //login_screen.dart
 import 'package:flutter/material.dart';
+import '../core/api/may_chu.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:app_links/app_links.dart';
@@ -127,7 +128,11 @@ class _LogInWidgetState extends State<LogInWidget> with SingleTickerProviderStat
       }
     } else {
       if (mounted) setState(() => _isLoading = false);
-      _showErrorSnackBar("Tài khoản hoặc mật khẩu không chính xác!");
+      // Nói đúng nguyên nhân thay vì mặc định đổ cho mật khẩu — xem
+      // AuthService.thongDiepLoiCuoi.
+      _showErrorSnackBar(AuthService.thongDiepLoiCuoi.isNotEmpty
+          ? AuthService.thongDiepLoiCuoi
+          : "Tài khoản hoặc mật khẩu không chính xác!");
       passwordController.clear();
       passwordFocusNode.requestFocus();
     }
@@ -229,7 +234,7 @@ class _LogInWidgetState extends State<LogInWidget> with SingleTickerProviderStat
   }
 
   Future<void> _handleMicrosoftLogin() async {
-    String url = "https://mobi.vinhuni.edu.vn/login/microsoft?prompt=select_account";
+    String url = "${MayChu.diaChi}/login/microsoft?prompt=select_account";
     if (await canLaunchUrl(Uri.parse(url))) await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
@@ -286,7 +291,7 @@ class _LogInWidgetState extends State<LogInWidget> with SingleTickerProviderStat
   }
 
   Widget _buildHeader(Size size) {
-    String avatarUrl = "https://mobi.vinhuni.edu.vn/api/get-avatar/?student_id=$_displayId&v=$_avatarVersion";
+    String avatarUrl = "${MayChu.diaChi}/api/get-avatar/?student_id=$_displayId&v=$_avatarVersion";
 
     return Positioned(
       top: 0, left: 0, right: 0, height: size.height * 0.38,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/api/may_chu.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -30,7 +31,7 @@ class ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _hasConsented = false;
 
   final Color vinhUniBlue = const Color(0xFF0054A6);
-  final Uri _privacyUrl = Uri.parse('https://mobi.vinhuni.edu.vn/privacy-policy');
+  final Uri _privacyUrl = Uri.parse('${MayChu.diaChi}/privacy-policy');
 
   @override
   void initState() {

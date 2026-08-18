@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'may_chu.dart';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -51,7 +52,7 @@ class ApiResponse {
 ///   • Hết phiên (401) tự đưa về màn đăng nhập, không cần mỗi màn tự kiểm tra
 ///   • Bị khoá (403, 429) tự hiện thông báo giải thích
 ///   • Địa chỉ máy chủ khai báo một chỗ, không lặp lại chuỗi
-///     "https://mobi.vinhuni.edu.vn/api" trong từng tệp
+///     "${MayChu.diaChi}/api" trong từng tệp
 ///
 /// KHÔNG ném ngoại lệ khi máy chủ trả 404 hay 500 — trả về [ApiResponse] có
 /// [ApiResponse.statusCode] tương ứng, giống hệt cách `package:http` hành xử.

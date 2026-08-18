@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/api/may_chu.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:vinhuni_app/services/database_helper.dart'; 
@@ -123,7 +124,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
     if (mounted) {
       setState(() {
         _myName = prefs.getString('full_name') ?? prefs.getString('user_name') ?? "Cán bộ"; 
-        _myAvatar = 'https://mobi.vinhuni.edu.vn/api/get-avatar/?student_id=${widget.userCode}';
+        _myAvatar = '${MayChu.diaChi}/api/get-avatar/?student_id=${widget.userCode}';
       });
     }
     
@@ -178,7 +179,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
   }
 
   void _connectSocket() {
-    _socket = IO.io('https://mobi.vinhuni.edu.vn', IO.OptionBuilder()
+    _socket = IO.io(MayChu.diaChi, IO.OptionBuilder()
         .setTransports(['websocket']).setPath('/socket.io').enableAutoConnect().build());
 
     _socket.onConnect((_) {
@@ -474,7 +475,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                           return ListTile(
                             leading: CircleAvatar(
                               backgroundColor: Colors.blue.shade100,
-                              backgroundImage: NetworkImage('https://mobi.vinhuni.edu.vn/api/get-avatar/?student_id=${user["id"]}'),
+                              backgroundImage: NetworkImage('${MayChu.diaChi}/api/get-avatar/?student_id=${user["id"]}'),
                               onBackgroundImageError: (_, __) {},
                               child: Text(user["name"][0], style: TextStyle(color: Colors.blue.shade900)),
                             ),
@@ -535,7 +536,7 @@ class _ChatRoomPageState extends State<ChatRoomPage> {
                         
                         return ListTile(
                           leading: CircleAvatar(
-                            backgroundImage: NetworkImage('https://mobi.vinhuni.edu.vn/api/get-avatar/?student_id=${m["id"]}'),
+                            backgroundImage: NetworkImage('${MayChu.diaChi}/api/get-avatar/?student_id=${m["id"]}'),
                             onBackgroundImageError: (_, __) {},
                             child: Text(m["name"][0]),
                           ),

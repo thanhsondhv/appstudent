@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/api/may_chu.dart';
 import 'package:intl/intl.dart'; 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -40,7 +41,7 @@ class ChatBubble extends StatelessWidget {
     bool isDeleted = data['IsDeleted'] == true || data['IsDeleted'] == 1 || data['is_deleted'] == true || data['is_deleted'] == 1;
     String senderId = (data['SenderCode'] ?? data['sender_code'] ?? "").toString();
     String senderName = data['SenderName'] ?? data['sender_name'] ?? data['FullName'] ?? (isMe ? "Bạn" : "Người dùng");
-    String avatarUrl = "https://mobi.vinhuni.edu.vn/api/get-avatar/?student_id=$senderId";
+    String avatarUrl = "${MayChu.diaChi}/api/get-avatar/?student_id=$senderId";
     String content = data['MessageContent'] ?? data['content'] ?? data['message_content'] ?? "";
     String time = _formatTime(data['CreatedAt'] ?? DateTime.now().toString());
 

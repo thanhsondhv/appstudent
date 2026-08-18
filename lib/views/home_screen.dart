@@ -1,5 +1,6 @@
 //homehome_screen.dart
 import 'package:flutter/material.dart';
+import '../core/api/may_chu.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:cached_network_image/cached_network_image.dart'; 
@@ -348,7 +349,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     // 1. Sửa URL Avatar sang đường dẫn trực tiếp /$studentId để khớp Log Server
-    String avatarUrl = 'https://mobi.vinhuni.edu.vn/api/get-avatar/$studentId?v=$_avatarVersion';
+    String avatarUrl = '${MayChu.diaChi}/api/get-avatar/$studentId?v=$_avatarVersion';
 
     // 2. Danh sách các màn hình chính (Tab)
     final List<Widget> screens = [

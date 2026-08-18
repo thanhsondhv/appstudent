@@ -82,6 +82,26 @@ def _bool(key: str, default: bool = False) -> bool:
     return os.getenv(key, str(default)).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _may_chu(key: str, default: str = "") -> str:
+    r"""Tên máy chủ SQL, đã chuẩn hoá dấu gạch ngược.
+
+    Tên thực thể SQL Server viết dạng `MÁY\THỰC_THỂ`, chỉ MỘT dấu gạch ngược.
+    Nhưng khi chép giá trị từ mã Python (nơi phải viết `\\` để thoát) sang tệp
+    `.env` (nơi không có cơ chế thoát), rất dễ mang theo cả hai dấu.
+
+    Đã xảy ra thật: `.env` ghi `STAFF_DB_SERVER=172.16.0.26\\VINHUNI`, chuỗi
+    kết nối sinh ra sai, đăng nhập cán bộ hỏng — mà thông báo lỗi ODBC chỉ nói
+    "Login timeout expired", không hề nhắc tới dấu gạch ngược.
+
+    Gộp mọi dãy gạch ngược liên tiếp thành một. Tên máy chủ SQL không bao giờ
+    có hai dấu liền nhau nên phép gộp này không làm hỏng giá trị đúng.
+    """
+    gia_tri = _opt(key, default)
+    while "\\\\" in gia_tri:
+        gia_tri = gia_tri.replace("\\\\", "\\")
+    return gia_tri
+
+
 # ---------------------------------------------------------------------------
 # Các nhóm cấu hình
 # ---------------------------------------------------------------------------
@@ -90,7 +110,7 @@ def _bool(key: str, default: bool = False) -> bool:
 @dataclass(frozen=True)
 class DatabaseSettings:
     driver: str = field(default_factory=lambda: _opt("DB_DRIVER", "ODBC Driver 17 for SQL Server"))
-    server: str = field(default_factory=lambda: _req("DB_SERVER"))
+    server: str = field(default_factory=lambda: _may_chu("DB_SERVER") or _req("DB_SERVER"))
     name: str = field(default_factory=lambda: _opt("DB_NAME", "VinhUni_Local"))
     user: str = field(default_factory=lambda: _req("DB_USER"))
     password: str = field(default_factory=lambda: _req("DB_PASSWORD"))
@@ -121,7 +141,7 @@ class StaffDatabaseSettings:
     """CSDL hồ sơ cán bộ — máy chủ riêng, tài khoản riêng với CSDL chính."""
 
     driver: str = field(default_factory=lambda: _opt("DB_DRIVER", "ODBC Driver 17 for SQL Server"))
-    server: str = field(default_factory=lambda: _opt("STAFF_DB_SERVER"))
+    server: str = field(default_factory=lambda: _may_chu("STAFF_DB_SERVER"))
     name: str = field(default_factory=lambda: _opt("STAFF_DB_NAME", "DBHoSoCanBo"))
     user: str = field(default_factory=lambda: _opt("STAFF_DB_USER"))
     password: str = field(default_factory=lambda: _opt("STAFF_DB_PASSWORD"))

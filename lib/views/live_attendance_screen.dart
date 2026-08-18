@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/api/may_chu.dart';
 import 'dart:async';
 import 'package:url_launcher/url_launcher.dart';
 import 'qr_generator_screen.dart';
@@ -216,7 +217,7 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen> {
 
   // 7. Xuất Excel
   Future<void> _exportExcel() async {
-    final String urlStr = "https://mobi.vinhuni.edu.vn/api/attendance/export-excel/${Uri.encodeComponent(widget.lhpCode)}";
+    final String urlStr = "${MayChu.diaChi}/api/attendance/export-excel/${Uri.encodeComponent(widget.lhpCode)}";
     if (await canLaunchUrl(Uri.parse(urlStr))) {
       await launchUrl(Uri.parse(urlStr), mode: LaunchMode.externalApplication);
     }
@@ -309,7 +310,7 @@ class _LiveAttendanceScreenState extends State<LiveAttendanceScreen> {
 
                     return ListTile(
                       leading: CircleAvatar(
-                        backgroundImage: NetworkImage("https://mobi.vinhuni.edu.vn/api/get-avatar/${sv['sid']}"),
+                        backgroundImage: NetworkImage("${MayChu.diaChi}/api/get-avatar/${sv['sid']}"),
                       ),
                       title: Text(sv['name'] ?? "Không rõ tên", style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
                       subtitle: Text("${sv['sid']} | ${sv['time'] ?? '---'}"),

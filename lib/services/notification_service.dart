@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../core/api/may_chu.dart';
 import 'dart:io';
 import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -15,7 +16,8 @@ import '../views/thongbao_screen.dart';
 import '../views/chatgroup/chat_group_list_page.dart';
 import '../core/api/api.dart';
 class NotificationService {
-  static const String domainApi = "https://mobi.vinhuni.edu.vn/api";
+  // Không dùng `const` được vì địa chỉ máy chủ đọc từ MayChu lúc chạy
+  static String get domainApi => "${MayChu.diaChi}/api";
   final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
   
   // Callback để làm mới UI khi có thông báo tới

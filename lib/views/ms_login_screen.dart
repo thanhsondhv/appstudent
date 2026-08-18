@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/api/may_chu.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 class MSLoginScreen extends StatefulWidget {
@@ -13,7 +14,7 @@ class _MSLoginScreenState extends State<MSLoginScreen> {
   bool _isLoading = true;
 
   // 🔥 URL API CỦA SERVER SƠN: Để Server tự điều hướng sang Microsoft
-  final String serverAuthUrl = "https://mobi.vinhuni.edu.vn/login/microsoft";
+  final String serverAuthUrl = "${MayChu.diaChi}/login/microsoft";
   final String deepLinkScheme = "vinhuni-app://login_success";
 
   @override
