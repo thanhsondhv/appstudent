@@ -2,13 +2,14 @@ import 'package:flutter/material.dart'; // 🔥 DÒNG QUAN TRỌNG NHẤT SƠN �
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import '../core/api/may_chu.dart';
 import '../core/auth/session.dart';
 import '../main.dart';
 
 class VinhUniClient {
   static final Dio _dio = Dio(
     BaseOptions(
-      baseUrl: 'https://mobi.vinhuni.edu.vn',
+      baseUrl: MayChu.diaChi,
       connectTimeout: const Duration(seconds: 30), 
       receiveTimeout: const Duration(seconds: 120),
       sendTimeout: const Duration(seconds: 60),

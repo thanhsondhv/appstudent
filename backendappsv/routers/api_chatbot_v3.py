@@ -2,6 +2,7 @@ import json
 import re
 from fastapi import APIRouter, Request, BackgroundTasks, HTTPException, Depends
 from openai import OpenAI
+from core.openai_client import tao_client  # thiếu khoá thì trả None, không làm chết backend
 from config.settings import OPENAI_API_KEY, CHAT_MODEL_FAST
 from services.db_service import DBService
 from services.chatbot_service import ChatbotService
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/api/chatbot-v3")
 # Khởi tạo các dịch vụ lõi
 db_service = DBService()
 chatbot_service = ChatbotService(db_service)
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = tao_client(OPENAI_API_KEY, ten_chuc_nang="trợ lý v3")
 doc_service = DocumentService()
 
 # --- [V3 LOGIC: GỢI Ý ĐỘNG THEO NGỮ CẢNH AI] ---

@@ -11,7 +11,8 @@ import numpy as np
 from firebase_admin import messaging
 from sentence_transformers import SentenceTransformer
 from typing import Optional
-from fastapi import APIRouter, Request, HTTPException, Form, Query, Depends
+from fastapi import APIRouter, Request, HTTPException, Form, Query, Depends, Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from auth.security_guard import verify_staff_token
 from auth.jwt_handler import get_current_user, Identity  # danh tính từ token (Pha 1)
 import os
@@ -54,6 +55,77 @@ def _ma_sinh_vien_duoc_phep(ma_yeu_cau, me: "Identity") -> str:
         # Cán bộ không truyền mã thì mặc định xem của chính mình
         return _lam_sach(ma_yeu_cau) or ma_token
     return ma_token
+
+
+# ---------------------------------------------------------------------------
+# Xác thực cho nhóm endpoint thông báo — triển khai theo hai bước
+# ---------------------------------------------------------------------------
+#
+# Vấn đề: /get-notifs, /count-unread, /mark-read, /hide-notif, /mark-all-read
+# đều nhận mã người dùng từ máy khách và tin luôn. Mã sinh viên là dãy số theo
+# quy luật, mã cán bộ chỉ 4-5 chữ số — đoán được. Nghĩa là bất kỳ ai cũng đọc
+# được thông báo của 62 nghìn tài khoản.
+#
+# Ràng buộc: bản ứng dụng đang cài trên máy người dùng gọi các endpoint này
+# BẰNG http trần, không kèm Authorization. Bật bắt buộc ngay là mọi máy chưa
+# cập nhật mất thông báo.
+#
+# Cách làm: công tắc REQUIRE_AUTH_NOTIFS trong .env.
+#   • false (mặc định, dùng khi vừa triển khai) — có token thì kiểm chặt, không
+#     có token thì vẫn phục vụ nhưng ghi nhật ký để đếm máy dùng bản cũ.
+#   • true — không có token là 401. Bật sau khi bản mới đã phủ hết.
+#
+# Thêm 18/08/2026.
+
+_xac_thuc_tuy_chon = HTTPBearer(auto_error=False)
+
+# Đếm số lượt gọi không kèm token, in gọn lại để không làm ngập nhật ký
+_dem_khong_token: dict[str, int] = {}
+
+
+async def danh_tinh_neu_co(
+    cred: Optional[HTTPAuthorizationCredentials] = Security(_xac_thuc_tuy_chon),
+) -> Optional[Identity]:
+    """Trả về danh tính khi máy khách có gửi token hợp lệ, ngược lại trả None.
+
+    Khác get_current_user ở chỗ KHÔNG ném 401 khi thiếu token — việc quyết định
+    chấp nhận hay từ chối để cho _ma_duoc_phep_mem() làm, dựa theo công tắc.
+    """
+    if cred is None or not cred.credentials:
+        return None
+    try:
+        from auth.jwt_handler import _decode
+        payload = _decode(cred.credentials)
+    except Exception:  # noqa: BLE001 — token hỏng coi như không có
+        return None
+    ma = str(payload.get("sub") or payload.get("user_id") or "").strip()
+    if not ma:
+        return None
+    return Identity(
+        user_code=ma.upper(),
+        role=str(payload.get("role") or "SinhVien").upper(),
+        method=str(payload.get("method") or "N/A"),
+        token_id=str(payload.get("jti") or ""),
+    )
+
+
+def _ma_duoc_phep_mem(ma_yeu_cau, me: Optional[Identity], ten_api: str) -> str:
+    """Như _ma_sinh_vien_duoc_phep nhưng chịu được máy khách bản cũ."""
+    if me is not None:
+        return _ma_sinh_vien_duoc_phep(ma_yeu_cau, me)
+
+    if settings.security.require_auth_notifs:
+        raise HTTPException(
+            status_code=401,
+            detail="Phiên đăng nhập đã hết hạn. Vui lòng cập nhật ứng dụng và đăng nhập lại.",
+        )
+
+    _dem_khong_token[ten_api] = _dem_khong_token.get(ten_api, 0) + 1
+    n = _dem_khong_token[ten_api]
+    if n <= 3 or n % 500 == 0:
+        print(f"⚠️  [{ten_api}] lượt gọi thứ {n} không kèm token — máy khách bản cũ. "
+              f"Bật REQUIRE_AUTH_NOTIFS=true khi con số này về 0.")
+    return str(ma_yeu_cau or "").strip().upper().replace("SV", "").replace("CB", "")
 
 # =========================================================
 # HELPER FUNCTIONS
@@ -410,7 +482,9 @@ async def send_notification_lhp(data: dict):
         return {"status": "error", "message": f"Lỗi Server: {str(e)}"}     
         
 @router.get("/get-notifs/{student_id}")
-async def api_get_notifs(student_id: str, page: int = 1):
+async def api_get_notifs(student_id: str, page: int = 1,
+                         me: Optional[Identity] = Depends(danh_tinh_neu_co)):
+    student_id = _ma_duoc_phep_mem(student_id, me, "get-notifs")
     page_size = 20
     offset = (page - 1) * page_size
     
@@ -845,7 +919,9 @@ async def api_get_notifs(student_id: str, page: int = 1):
         # print(f"🔥 Lỗi API Get Notifs: {str(e)}")
         # return []
 @router.get("/count-unread/{student_id}")
-async def count_unread(student_id: str):
+async def count_unread(student_id: str,
+                       me: Optional[Identity] = Depends(danh_tinh_neu_co)):
+    student_id = _ma_duoc_phep_mem(student_id, me, "count-unread")
     try:
         # 1. Làm sạch mã số (Ví dụ: CB1679 -> 1679)
         sid_clean = str(student_id).strip().upper().replace("SV", "").replace("CB", "")
@@ -1174,14 +1250,15 @@ async def search_documents(
         # print(f"🔥 Lỗi khi ẩn tin: {str(e)}")
         # return JSONResponse(status_code=500, content={"message": str(e)})
 @router.post("/hide-notif/{notif_id}") 
-async def api_hide_notif(notif_id: int, request: Request):
+async def api_hide_notif(notif_id: int, request: Request,
+                         me: Optional[Identity] = Depends(danh_tinh_neu_co)):
     try:
         data = await request.json()
         student_id = data.get("student_id")
         if not student_id:
             return JSONResponse(status_code=400, content={"message": "Thiếu student_id"})
 
-        sid_clean = str(student_id).strip().upper().replace("SV", "")
+        sid_clean = _ma_duoc_phep_mem(student_id, me, "hide-notif")
 
         with pyodbc.connect(REMOTE_CONN_STR, autocommit=True) as conn:
             cursor = conn.cursor()
@@ -1203,12 +1280,12 @@ async def api_hide_notif(notif_id: int, request: Request):
     except Exception as e:
         return JSONResponse(status_code=500, content={"message": str(e)})        
 @router.post("/mark-read/{notif_id}")
-async def mark_read(notif_id: int, request: Request):
+async def mark_read(notif_id: int, request: Request,
+                    me: Optional[Identity] = Depends(danh_tinh_neu_co)):
     try:
         data = await request.json()
         student_id = data.get("student_id")
-        # Logic làm sạch sid giữ nguyên...
-        sid_clean = str(student_id).strip().upper().replace("SV", "").replace("CB", "")
+        sid_clean = _ma_duoc_phep_mem(student_id, me, "mark-read")
 
         with pyodbc.connect(REMOTE_CONN_STR, autocommit=True) as conn:
             cursor = conn.cursor()
@@ -1236,7 +1313,8 @@ async def mark_read(notif_id: int, request: Request):
 
 
 @router.post("/mark-all-read/{student_id}")
-async def mark_all_read(student_id: str):
+async def mark_all_read(student_id: str,
+                        me: Optional[Identity] = Depends(danh_tinh_neu_co)):
     """Đánh dấu toàn bộ thông báo của một người là đã đọc.
 
     Bổ sung 18/08/2026. Trước đây ứng dụng có nút "Đánh dấu tất cả đã đọc"
@@ -1247,7 +1325,9 @@ async def mark_all_read(student_id: str):
       • tbl_Notification_Log_Detail    — tin cá nhân, tin nhóm gửi đích danh
     Bỏ sót một bảng thì một phần thông báo vẫn hiện là chưa đọc.
     """
-    sid_clean = str(student_id).strip().upper().replace("SV", "").replace("CB", "")
+    # Endpoint này MỚI hoàn toàn — không có bản ứng dụng cũ nào gọi tới, nên
+    # dùng kiểm quyền chặt được ngay mà không sợ vỡ tương thích.
+    sid_clean = _ma_duoc_phep_mem(student_id, me, "mark-all-read")
     if not sid_clean:
         return JSONResponse(status_code=400,
                             content={"status": "ERROR", "message": "Thiếu mã người dùng"})

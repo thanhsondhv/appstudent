@@ -54,21 +54,44 @@ class Settings:
         self.OPENAI_API_KEY = self._load_openai_key()
 
     def _load_openai_key(self):
+        """Khoá OpenAI, ưu tiên .env rồi mới đến appsettings.json.
+
+        ⚠️ SỬA 18/08/2026 — lỗi phát sinh từ chính đợt dọn khoá bí mật (Pha 0).
+        Đợt đó chuyển mọi khoá sang .env và chặn appsettings.json khỏi git, nhưng
+        hàm này vẫn CHỈ đọc appsettings.json. Máy chủ đang chạy còn tệp cũ nên
+        không ai thấy gì; cài mới từ kho mã thì hàm trả None, `OpenAI(api_key=None)`
+        ném lỗi ngay lúc nạp module, và CẢ backend không khởi động được.
+
+        Vẫn đọc appsettings.json làm phương án dự phòng để những máy chủ chưa kịp
+        tạo .env không bị gãy khi cập nhật.
+        """
+        khoa = (core_settings.ai.openai_api_key or "").strip()
+        if khoa:
+            return khoa
+
         try:
             if os.path.exists(self.APP_SETTINGS_PATH):
                 with open(self.APP_SETTINGS_PATH, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     # Hỗ trợ cả 2 định dạng key trong appsettings
                     return data.get("OpenAI", {}).get("ApiKey") or data.get("OPENAI_API_KEY")
-            return None
-        except: 
-            return None
+        except Exception:
+            pass
+        return None
 
 # Khởi tạo instance
 settings = Settings()
 
-# Khởi tạo OpenAI Client
-client = OpenAI(api_key=settings.OPENAI_API_KEY)
+# Khởi tạo OpenAI Client.
+#
+# Không có khoá thì để client = None thay vì ném lỗi. Trước đây thiếu khoá là
+# `OpenAI(api_key=None)` ném ngay lúc nạp module, kéo theo cả backend không khởi
+# động nổi — chỉ vì một chức năng phụ. Nay các phần khác vẫn chạy, riêng chỗ nào
+# dùng AI thì tự báo lỗi của nó.
+client = OpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
+if client is None:
+    print("⚠️  [config] Không có OPENAI_API_KEY — các chức năng AI sẽ không hoạt động. "
+          "Đặt OPENAI_API_KEY trong .env để bật lại.")
 
 # Khởi tạo Firebase Admin SDK (Chỉ khởi tạo 1 lần duy nhất)
 # if not firebase_admin._apps:

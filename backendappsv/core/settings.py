@@ -206,6 +206,24 @@ class SecuritySettings:
         default_factory=lambda: _opt("FIREBASE_CREDENTIALS_PATH", "vinhuni-portal-firebase-adminsdk.json")
     )
 
+    # Công tắc siết xác thực cho nhóm endpoint thông báo.
+    #
+    # Các endpoint /get-notifs, /count-unread, /mark-read, /hide-notif nhận mã
+    # người dùng từ đường dẫn mà không đối chiếu với ai đang gọi — tức là biết
+    # mã số của người khác là đọc được thông báo của họ. Phải bịt.
+    #
+    # Nhưng bản ứng dụng đang cài trên máy sinh viên KHÔNG gửi token cho những
+    # endpoint này. Bật bắt buộc ngay là toàn bộ máy chưa cập nhật mất thông báo.
+    #
+    # Vì vậy chia hai bước:
+    #   • Để FALSE khi vừa triển khai: có token thì kiểm tra chặt, không có thì
+    #     vẫn phục vụ nhưng ghi nhật ký để đếm còn bao nhiêu máy dùng bản cũ.
+    #   • Đổi thành TRUE sau khi bản ứng dụng mới đã phủ hết — lúc đó không có
+    #     token là bị từ chối.
+    require_auth_notifs: bool = field(
+        default_factory=lambda: _bool("REQUIRE_AUTH_NOTIFS", False)
+    )
+
     @property
     def allowed_origins(self) -> list[str]:
         raw = _opt("CORS_ALLOWED_ORIGINS", "https://mobi.vinhuni.edu.vn")

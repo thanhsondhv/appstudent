@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/database_helper.dart';
 import '../api/api.dart';
@@ -42,7 +43,12 @@ class NotificationRepository {
     // 1. Trả dữ liệu đã lưu trước — mở màn hình là thấy nội dung ngay
     final duLieuCu = await _db.getOfflineNotifs(maNguoiDung);
 
-    // 2. Gọi máy chủ ở nền
+    // 2. Trả nợ những lần đánh dấu đã đọc chưa báo được lên máy chủ.
+    //    Phải chạy TRƯỚC khi tải danh sách mới, nếu không máy chủ sẽ trả về
+    //    trạng thái cũ và ghi đè lên phần người dùng đã đọc tại máy.
+    await _traNoDanhDau(maNguoiDung);
+
+    // 3. Gọi máy chủ ở nền
     unawaited(
       _capNhatTuMayChu(maNguoiDung).then((duLieuMoi) {
         if (duLieuMoi != null && khiCoDuLieuMoi != null) {
@@ -88,10 +94,11 @@ class NotificationRepository {
     final maNguoiDung = await Session.userCode;
     unawaited(
       Api.post('/api/mark-read/$maTin', duLieu: {'student_id': maNguoiDung})
-          .then((res) {
+          .then((res) async {
         if (!res.thanhCong) {
           debugPrint('⚠️ [ThôngBáo] Máy chủ chưa ghi nhận đã đọc tin $maTin: '
               '${res.thongDiepLoi}');
+          await _xepHang(maNguoiDung, '$maTin');
         }
       }),
     );
@@ -116,9 +123,88 @@ class NotificationRepository {
     if (!res.thanhCong) {
       debugPrint('⚠️ [ThôngBáo] Máy chủ chưa ghi nhận đánh dấu tất cả: '
           '${res.thongDiepLoi}');
+      await _xepHang(maNguoiDung, _CA_DANH_SACH);
       return false;
     }
+    await _xoaHang(maNguoiDung);
     return true;
+  }
+
+  // -- Hàng đợi đồng bộ ------------------------------------------------------
+  //
+  // Đánh dấu đã đọc ghi vào máy trước rồi mới báo máy chủ. Khi máy chủ không
+  // nhận được — mất mạng, máy chủ bận, hoặc bản trên máy chủ chưa có endpoint —
+  // thì việc đó phải được nhớ lại và làm lại, nếu không trạng thái đọc chỉ tồn
+  // tại trên một máy và sẽ biến mất khi cài lại ứng dụng.
+  //
+  // Thêm 18/08/2026: trước đó giao diện có báo "sẽ thử lại khi có mạng" nhưng
+  // thực tế không có chỗ nào thử lại cả.
+
+  /// Giá trị đánh dấu "toàn bộ danh sách", để phân biệt với mã của từng tin.
+  static const _CA_DANH_SACH = 'TAT_CA';
+
+  static String _khoaHang(String maNguoiDung) => 'tb_cho_dong_bo_$maNguoiDung';
+
+  Future<void> _xepHang(String maNguoiDung, String muc) async {
+    if (maNguoiDung.isEmpty) return;
+    final bo = await SharedPreferences.getInstance();
+    final khoa = _khoaHang(maNguoiDung);
+    final dsCu = bo.getStringList(khoa) ?? const [];
+
+    // Đã nợ cả danh sách thì không cần nhớ thêm từng tin lẻ nữa
+    if (dsCu.contains(_CA_DANH_SACH)) return;
+    if (muc == _CA_DANH_SACH) {
+      await bo.setStringList(khoa, [_CA_DANH_SACH]);
+      return;
+    }
+    if (dsCu.contains(muc)) return;
+
+    // Chặn hàng đợi phình vô hạn khi máy chủ hỏng lâu ngày: quá 200 tin lẻ thì
+    // gộp thành một lệnh đánh dấu tất cả, vừa nhẹ vừa cho kết quả tương đương.
+    if (dsCu.length >= 200) {
+      await bo.setStringList(khoa, [_CA_DANH_SACH]);
+      return;
+    }
+    await bo.setStringList(khoa, [...dsCu, muc]);
+  }
+
+  Future<void> _xoaHang(String maNguoiDung) async {
+    final bo = await SharedPreferences.getInstance();
+    await bo.remove(_khoaHang(maNguoiDung));
+  }
+
+  /// Gửi lại những lần đánh dấu đã đọc còn nợ. Im lặng khi không có gì nợ.
+  Future<void> _traNoDanhDau(String maNguoiDung) async {
+    final bo = await SharedPreferences.getInstance();
+    final khoa = _khoaHang(maNguoiDung);
+    final dsNo = bo.getStringList(khoa) ?? const [];
+    if (dsNo.isEmpty) return;
+
+    if (dsNo.contains(_CA_DANH_SACH)) {
+      final res = await Api.post('/api/mark-all-read/$maNguoiDung');
+      if (res.thanhCong) {
+        await bo.remove(khoa);
+        debugPrint('✅ [ThôngBáo] Đã đồng bộ lại lệnh đánh dấu tất cả đã đọc');
+      }
+      return;
+    }
+
+    final conNo = <String>[];
+    for (final maTin in dsNo) {
+      final res = await Api.post('/api/mark-read/$maTin',
+          duLieu: {'student_id': maNguoiDung});
+      // 404 nghĩa là tin không còn tồn tại trên máy chủ — nợ này vô nghĩa,
+      // giữ lại chỉ làm hàng đợi không bao giờ vơi.
+      if (!res.thanhCong && res.statusCode != 404) conNo.add(maTin);
+    }
+
+    if (conNo.isEmpty) {
+      await bo.remove(khoa);
+      debugPrint('✅ [ThôngBáo] Đã đồng bộ lại ${dsNo.length} tin đã đọc');
+    } else {
+      await bo.setStringList(khoa, conNo);
+      debugPrint('⚠️ [ThôngBáo] Còn ${conNo.length}/${dsNo.length} tin chưa đồng bộ được');
+    }
   }
 
   // -- Ẩn thông báo ----------------------------------------------------------
@@ -141,6 +227,31 @@ class NotificationRepository {
   /// có ngay cả khi mất mạng. Máy chủ là nguồn đúng khi đồng bộ, còn để hiển
   /// thị thì dữ liệu tại máy đủ và nhanh hơn.
   Future<int> soChuaDoc() async => _db.getUnreadCount(await Session.userCode);
+
+  /// Số chưa đọc dùng cho huy hiệu ở thanh điều hướng.
+  ///
+  /// Sửa 18/08/2026 — trước đó huy hiệu hỏi thẳng `/api/count-unread` còn danh
+  /// sách đọc từ SQLite. Hai nguồn khác nhau nên lệch nhau ngay khi máy chủ
+  /// chưa kịp ghi nhận: huy hiệu báo 12 mà mở ra không còn tin nào chưa đọc.
+  ///
+  /// Nay lấy số tại máy làm chuẩn, vì đó chính là những gì người dùng sẽ thấy
+  /// khi bấm vào. Chỉ hỏi máy chủ khi máy chưa có dữ liệu nào — tức lần đầu cài
+  /// đặt, lúc mà số tại máy bằng 0 không phải vì đã đọc hết mà vì chưa tải về.
+  Future<int> soChuaDocChoHuyHieu() async {
+    final maNguoiDung = await Session.userCode;
+    if (maNguoiDung.isEmpty) return 0;
+
+    final daCoDuLieu = (await _db.getOfflineNotifs(maNguoiDung)).isNotEmpty;
+    if (daCoDuLieu) return _db.getUnreadCount(maNguoiDung);
+
+    final res = await Api.get('/api/count-unread/$maNguoiDung');
+    if (res.thanhCong && res.data is Map) {
+      final so = (res.data as Map)['unread_count'];
+      if (so is int) return so;
+      if (so is String) return int.tryParse(so) ?? 0;
+    }
+    return 0;
+  }
 }
 
 /// Chạy một Future ở nền mà không chờ, đồng thời nói rõ ý định đó trong mã.

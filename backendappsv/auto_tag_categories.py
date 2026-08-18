@@ -2,6 +2,7 @@ import pyodbc
 import json
 import time
 from openai import OpenAI
+from core.openai_client import tao_client  # thiếu khoá thì trả None, không làm chết backend
 from core.settings import settings  # cấu hình tập trung (Pha 0)
 
 # ==========================================================
@@ -15,7 +16,7 @@ DB_CONFIG = {
 }
 
 OPENAI_API_KEY = settings.ai.openai_api_key
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = tao_client(OPENAI_API_KEY, ten_chuc_nang="gắn nhãn tự động")
 
 # ==========================================================
 # 2. CÁC HÀM XỬ LÝ CHÍNH

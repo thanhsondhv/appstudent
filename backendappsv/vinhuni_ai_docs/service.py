@@ -1,6 +1,7 @@
 import os
 import json
 from openai import OpenAI
+from core.openai_client import tao_client  # thiếu khoá thì trả None, không làm chết backend
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Đọc cấu hình từ appsettings.json ở thư mục gốc
@@ -18,7 +19,7 @@ CHUNK_SIZE = CONFIG['RAGConfig']['ChunkSize']
 CHUNK_OVERLAP = CONFIG['RAGConfig']['ChunkOverlap']
 
 # Khởi tạo OpenAI Client
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = tao_client(OPENAI_API_KEY, ten_chuc_nang="tra cứu văn bản")
 
 class AIService:
     @staticmethod

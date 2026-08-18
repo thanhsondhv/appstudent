@@ -62,11 +62,44 @@ class ThuThapTen(ast.NodeVisitor):
                 raise _CoImportSao()
             self.dinh_nghia.add(a.asname or a.name)
 
+    def _tham_so_cap_module(self, node) -> None:
+        """Xét phần chữ ký hàm được CHẠY ngay lúc nạp module.
+
+        Thân hàm chỉ chạy khi có người gọi, nên tên chưa định nghĩa ở đó không
+        làm chết tiến trình lúc khởi động — cố ý bỏ qua. Nhưng giá trị mặc định
+        và chú thích kiểu thì được tính NGAY tại lúc `def` chạy, tức là cấp
+        module.
+
+        Bổ sung 18/08/2026: bản đầu bỏ qua cả chữ ký, nên để lọt
+        `me: Identity = Depends(get_current_user)` trong routers/api_chatbot_v2.py
+        — tệp thiếu import Depends. Cả backend không khởi động nổi, mà py_compile
+        vẫn báo hợp lệ. Đúng loại lỗi mà bài kiểm tra này sinh ra để chặn.
+        """
+        args = node.args
+        for gia_tri in list(args.defaults) + [k for k in args.kw_defaults if k]:
+            self.generic_visit(gia_tri)
+
+        moi_tham_so = (
+            list(args.args) + list(args.posonlyargs) + list(args.kwonlyargs)
+            + [a for a in (args.vararg, args.kwarg) if a]
+        )
+        for ts in moi_tham_so:
+            if ts.annotation is not None:
+                self.generic_visit(ts.annotation)
+
+        if node.returns is not None:
+            self.generic_visit(node.returns)
+
+        for trang_tri in node.decorator_list:
+            self.generic_visit(trang_tri)
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._tham_so_cap_module(node)
         self.dinh_nghia.add(node.name)
-        # Không đi vào thân hàm
+        # Không đi vào THÂN hàm — phần đó chỉ chạy khi được gọi
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._tham_so_cap_module(node)
         self.dinh_nghia.add(node.name)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:

@@ -81,3 +81,14 @@ xlsxwriter==3.2.9
 #   pip install "pyHanko[pkcs11,image-support]"
 pyHanko>=0.25.0
 pyhanko-certvalidator>=0.26.0
+
+# --- Bổ sung 18/08/2026 ---
+# Năm gói dưới đây được import trong mã nhưng chưa từng khai ở đây. Máy chủ
+# đang chạy có sẵn nên không ai phát hiện; cài mới bằng `pip install -r
+# requirements.txt` thì tiến trình chết ngay khi khởi động.
+# Phát hiện bằng tests/kiem_tra_module_thieu.py.
+apscheduler>=3.10          # sync_and_notify_worker_new.py — bộ hẹn giờ các tác vụ nền
+lunar-python>=1.3          # sync_and_notify_worker_new.py, vinhuni_data_collector.py — âm lịch
+faster-whisper>=1.0        # services/whisper_service.py — chuyển giọng nói thành văn bản
+langchain-text-splitters>=0.2  # vinhuni_ai_docs/service.py — cắt văn bản dài cho AI
+sentence-transformers>=2.2 # vinhuni_notifications/router.py, chuyenpdf_vector.py — vector ngữ nghĩa

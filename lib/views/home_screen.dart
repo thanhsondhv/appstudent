@@ -36,6 +36,7 @@ import 'package:vinhuni_app/views/secretary/student_secretary_screen.dart';
 import '../core/auth/user_role.dart';
 import '../core/auth/session.dart';
 import '../core/api/api.dart';
+import '../core/repositories/notification_repository.dart';
 
 
 final GlobalKey<ChatScreenState> chatScreenKey = GlobalKey<ChatScreenState>();
@@ -71,9 +72,27 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    
+
+    // Nối dây làm mới huy hiệu.
+    //
+    // Sửa 18/08/2026: `NotificationService.onRefreshBadge` được khai báo và
+    // được gọi ở ba nơi (khi có tin đẩy tới, khi đọc một tin, khi đánh dấu tất
+    // cả đã đọc) nhưng chưa bao giờ được GÁN. Mọi lời gọi đều rơi vào nhánh
+    // null, nên con số trên huy hiệu đứng yên cho tới lần mở lại ứng dụng.
+    NotificationService.onRefreshBadge = () {
+      if (mounted) _fetchUnreadCount();
+    };
+
     _initAppData();
     WidgetsBinding.instance.addPostFrameCallback((_) { _checkVersion(); });
+  }
+
+  @override
+  void dispose() {
+    // Gỡ dây khi màn hình bị huỷ (đăng xuất rồi đăng nhập lại), tránh gọi
+    // setState trên State đã chết.
+    NotificationService.onRefreshBadge = null;
+    super.dispose();
   }
 
   Future<void> _initAppData() async {
@@ -263,11 +282,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _fetchUnreadCount() async {
     if (studentId.isEmpty) return;
     try {
-      final response = await Api.get('/api/count-unread/$studentId');
-      if (response.thanhCong && response.data is Map && mounted) {
-        final data = response.data as Map;
-        setState(() => _unreadCount = data['unread_count'] ?? 0);
-      }
+      // Lấy qua kho dữ liệu thông báo để huy hiệu và danh sách luôn cùng một
+      // con số. Gọi thẳng /api/count-unread như trước làm hai nơi lệch nhau khi
+      // người dùng đã đọc tại máy mà máy chủ chưa ghi nhận.
+      final so = await NotificationRepository.instance.soChuaDocChoHuyHieu();
+      if (mounted) setState(() => _unreadCount = so);
     } catch (e) {}
   }
 

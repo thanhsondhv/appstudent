@@ -11,6 +11,7 @@ import '../views/chatgroup/chat_room_page.dart';
 import 'database_helper.dart';
 import '../main.dart'; // Chứa navigatorKey toàn cục
 import '../views/thongbao_chitiet_screen.dart';
+import '../views/thongbao_screen.dart';
 import '../views/chatgroup/chat_group_list_page.dart';
 import '../core/api/api.dart';
 class NotificationService {
@@ -169,15 +170,32 @@ class NotificationService {
     }
 
     // NẾU LÀ THÔNG BÁO BÌNH THƯỜNG CỦA TRƯỜNG
-    if (idStr == null) return;
-    
-    // Đợi an toàn cho thông báo thường
+    //
+    // 🔥 SỬA 18/08/2026: bản cũ dùng `int.parse(idStr)` không bọc bảo vệ. Chỉ
+    // cần máy chủ gửi thiếu trường `nid`, gửi chuỗi rỗng, hay gửi `0` (mã
+    // không có thật) là ứng dụng văng ngay khi người dùng bấm vào thông báo —
+    // đúng lúc không có cách nào chẩn đoán. Đã gặp thật khi gửi tin thử với
+    // nid = 0: màn chi tiết mở ra trắng trơn.
+    //
+    // Nay: mã không hợp lệ thì đưa về danh sách thông báo, người dùng vẫn tới
+    // được nội dung thay vì mất cả ứng dụng.
+    final int maTin = int.tryParse(idStr ?? '') ?? 0;
     await Future.delayed(const Duration(milliseconds: 500));
+
+    if (maTin <= 0) {
+      debugPrint("⚠️ Thông báo không kèm mã tin hợp lệ (nid='$idStr'), "
+          "mở danh sách thông báo thay thế.");
+      navigatorKey.currentState?.push(
+        MaterialPageRoute(builder: (context) => const ThongBaoScreen()),
+      ).then((_) => refreshAppIconBadge());
+      return;
+    }
+
     navigatorKey.currentState?.push(
       MaterialPageRoute(
         builder: (context) => ChiTietThongBaoScreen(
           notification: {
-            'ID': int.parse(idStr),
+            'ID': maTin,
             'TieuDe': 'Đang tải...', 
             'LoaiTin': type ?? 'GENERAL'
           },

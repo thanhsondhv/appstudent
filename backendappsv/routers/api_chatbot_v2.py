@@ -1,8 +1,9 @@
 import json
 import random
 import re
-from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
 from openai import OpenAI
+from core.openai_client import tao_client  # thiếu khoá thì trả None, không làm chết backend
 
 # Import cấu hình và các Service lõi
 from config.settings import OPENAI_API_KEY, CHAT_MODEL_FAST
@@ -17,7 +18,7 @@ router = APIRouter(prefix="/api/chatbot-v2")
 # Khởi tạo các Core Services
 db_service = DBService()
 chatbot_service = ChatbotService(db_service) 
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = tao_client(OPENAI_API_KEY, ten_chuc_nang="trợ lý v2")
 
 # Danh sách Category chuẩn để lọc RAG
 VALID_CATEGORIES = ["Quy chế đào tạo", "Quy chế một cửa", "Học phí & Học bổng", "Công tác sinh viên", "Khác"]

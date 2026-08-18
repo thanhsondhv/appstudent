@@ -2,19 +2,13 @@ import json
 import os
 from openai import OpenAI
 
-# Tự động tìm và tải cấu hình từ appsettings.json thay cho 'from .. import CONFIG'
-def load_vinhuni_config():
-    paths = [
-        os.path.join(os.getcwd(), '..', 'appsettings.json'), # Nếu chạy từ thư mục con
-        os.path.join(os.getcwd(), 'appsettings.json')        # Nếu chạy từ gốc dự án
-    ]
-    for p in paths:
-        if os.path.exists(p):
-            with open(p, 'r', encoding='utf-8') as f:
-                return json.load(f)
-    raise FileNotFoundError("❌ Không tìm thấy file appsettings.json. Hãy đảm bảo file tồn tại.")
-
-CONFIG = load_vinhuni_config()
+# Cấu hình lấy từ gói cha — nơi đã gộp .env với appsettings.json.
+#
+# ⚠️ SỬA 18/08/2026: bản cũ tự dò `appsettings.json` theo thư mục làm việc và
+# NÉM FileNotFoundError ngay lúc nạp module nếu không thấy. Từ khi khoá bí mật
+# chuyển sang .env (Pha 0), tệp đó không còn được commit — cài mới từ kho mã là
+# cả backend không khởi động nổi chỉ vì một dịch vụ phụ.
+from .. import CONFIG
 
 class AIServiceV2:
     def __init__(self):
