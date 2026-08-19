@@ -30,25 +30,34 @@ python3 tests/kiem_tra_ten_khong_xac_dinh.py || LOI=1
 muc "3. Lớp an toàn cho trợ lý AI"
 python3 tests/test_ai_guard.py || LOI=1
 
-muc "4. Module nội bộ / thư viện bị thiếu"
+muc "4. Cấu hình kết nối cơ sở dữ liệu"
+# Tên máy chủ viết cứng chỉ đúng trên đúng một máy; ở nơi khác pyodbc chờ hết
+# 15 giây mặc định. Ngày 19/08/2026, database/database.py mắc đúng lỗi đó và vì
+# middleware gọi nó trên MỌI yêu cầu nên cả hệ thống mất 15 giây mỗi lượt.
+python3 tests/kiem_tra_cau_hinh_ket_noi.py || LOI=1
+
+muc "5. Bảng người nhận thông báo (tự bỏ qua nếu không có CSDL)"
+python3 tests/kiem_tra_bang_nguoi_nhan.py || LOI=1
+
+muc "6. Module nội bộ / thư viện bị thiếu"
 # Bắt trường hợp mã nguồn import một module chưa được commit, hoặc một thư viện
 # chưa khai trong requirements.txt. Cả hai đều chỉ vỡ khi CHẠY, không phải khi
 # biên dịch — và vỡ đúng lúc cài mới lên máy chủ.
 python3 tests/kiem_tra_module_thieu.py || LOI=1
 
-muc "5. Phân quyền các endpoint thông báo"
+muc "7. Phân quyền các endpoint thông báo"
 python3 tests/test_quyen_thong_bao.py || LOI=1
 
-muc "6. Hàng đợi thông báo (chia lô, đếm phần, lấy lại việc bỏ dở)"
+muc "8. Hàng đợi thông báo (chia lô, đếm phần, lấy lại việc bỏ dở)"
 python3 tests/test_hang_doi_thong_bao.py || LOI=1
 
-muc "7. Tích hợp với Redis thật (tự bỏ qua nếu không có Redis)"
+muc "9. Tích hợp với Redis thật (tự bỏ qua nếu không có Redis)"
 python3 tests/test_tich_hop_redis.py || LOI=1
 
-muc "8. Firebase (dry_run — không gửi gì; tự bỏ qua nếu thiếu khoá/CSDL)"
+muc "10. Firebase (dry_run — không gửi gì; tự bỏ qua nếu thiếu khoá/CSDL)"
 python3 tests/kiem_tra_firebase.py || LOI=1
 
-muc "9. Khoá bí mật lọt vào mã nguồn"
+muc "11. Khoá bí mật lọt vào mã nguồn"
 if grep -rEn "sk-proj-[A-Za-z0-9]|ITCdhv@|AI2025\\\\SQLEXPRESS|= *'sa'" \
      --include="*.py" . 2>/dev/null | grep -v __pycache__ | grep -v _luu_tru | grep -v tests/; then
   echo "   ❌ phát hiện khoá viết cứng"; LOI=1

@@ -1,22 +1,46 @@
 import pyodbc
+import os
+import sys
+from pathlib import Path
+
+_GOC = Path(__file__).resolve().parent.parent.parent
+if str(_GOC) not in sys.path:
+    sys.path.insert(0, str(_GOC))
+from core.settings import settings  # cấu hình tập trung (Pha 0)
 import json
 import numpy as np
 from .. import CONFIG 
 
 class DBService:
     def __init__(self):
-        # Cập nhật: Dùng tài khoản ChatbotUser để bảo mật (chỉ SELECT)
-        self.conn_str = (
-            "DRIVER={ODBC Driver 17 for SQL Server};"
-            "SERVER=AI2025\\SQLEXPRESS02;"
-            "DATABASE=VinhUni_Local;"
-            "UID=ChatbotUser;"
-            "PWD=VinhUni@2026;"
-        )
+        # ⚠️ SỬA 19/08/2026: bản cũ viết cứng cả tên máy chủ lẫn MẬT KHẨU
+        # (tài khoản ChatbotUser) ngay trong mã nguồn. Hai hệ quả:
+        #
+        #   • Mật khẩu nằm trong kho mã, ai đọc được mã là đọc được mật khẩu.
+        #     Đợt dọn khoá bí mật (Pha 0) bỏ sót tệp này.
+        #   • Tên máy chủ viết cứng chỉ đúng trên đúng một máy; ở nơi khác
+        #     pyodbc chờ hết 15 giây mặc định rồi mới báo lỗi.
+        #
+        # Tài khoản riêng chỉ có quyền SELECT vẫn là cách làm đúng — nay khai
+        # trong .env qua CHATBOT_DB_USER / CHATBOT_DB_PASSWORD. Không khai thì
+        # dùng tài khoản chung.
+        nguoi_dung = os.getenv("CHATBOT_DB_USER", "").strip()
+        mat_khau = os.getenv("CHATBOT_DB_PASSWORD", "").strip()
+
+        if nguoi_dung and mat_khau:
+            self.conn_str = (
+                f"DRIVER={{{settings.db.driver}}};"
+                f"SERVER={settings.db.server};"
+                f"DATABASE={settings.db.name};"
+                f"UID={nguoi_dung};PWD={mat_khau};"
+                "TrustServerCertificate=yes;"
+            )
+        else:
+            self.conn_str = settings.db.local_conn_str
 
     def _get_conn(self):
         """Khởi tạo kết nối SQL Server"""
-        return pyodbc.connect(self.conn_str)
+        return pyodbc.connect(self.conn_str, timeout=5)
 
     # --- 1. HÀM TỔNG HỢP DỮ LIỆU SINH VIÊN (Trang chủ) ---
     def get_student_summary(self, student_id: str):

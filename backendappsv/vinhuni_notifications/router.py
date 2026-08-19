@@ -109,6 +109,91 @@ async def danh_tinh_neu_co(
     )
 
 
+# ---------------------------------------------------------------------------
+# Điều kiện "thông báo này có gửi cho người đó không"
+# ---------------------------------------------------------------------------
+#
+# Cả tbl_ThongBao lẫn tbl_Notification_Queue lưu danh sách người nhận thành MỘT
+# CHUỖI mã ngăn bởi dấu phẩy, kiểu NVARCHAR(MAX). Bản cũ dò bằng LIKE '%mã%'.
+#
+# Hai vấn đề, đo trên dữ liệu thật ngày 19/08/2026:
+#
+#   • SAI. `LIKE '%1679%'` khớp cả những mã DÀI HƠN có chứa "1679" ở giữa. Tài
+#     khoản 1679 khớp 22 thông báo, trong khi so khớp đúng theo dấu phân cách
+#     khớp 0 — tức người dùng đọc được 22 thông báo không phải của mình. Một
+#     sinh viên thật nhận 381 tin thay vì 332 tin đúng.
+#
+#   • CHẬM. Cột đó trung bình 263.948 ký tự mỗi dòng, tổng ~240 MB. Mỗi lần mở
+#     danh sách thông báo là quét lại trọn 240 MB: 5,02 giây cho MỘT người.
+#
+# Nay tra trong bảng tbl_ThongBao_NguoiNhan (đã tách sẵn, có chỉ mục): 0,01
+# giây và đúng. Xem sql/2026-08-19_bang_nguoi_nhan_thong_bao.sql.
+#
+# Vẫn giữ đường lui bằng LIKE để mã có thể lên máy chủ TRƯỚC khi chạy kịch bản
+# tạo bảng — không thì mỗi lần triển khai phải canh đúng thứ tự.
+
+_co_bang_nguoi_nhan: Optional[bool] = None
+
+
+def _kiem_tra_bang_nguoi_nhan(cursor) -> bool:
+    """Máy chủ này đã có bảng người nhận chưa. Hỏi một lần rồi nhớ."""
+    global _co_bang_nguoi_nhan
+    if _co_bang_nguoi_nhan is not None:
+        return _co_bang_nguoi_nhan
+    try:
+        cursor.execute(
+            "SELECT CASE WHEN OBJECT_ID('dbo.tbl_ThongBao_NguoiNhan','U') IS NULL "
+            "THEN 0 ELSE 1 END")
+        _co_bang_nguoi_nhan = bool(cursor.fetchval())
+    except Exception:  # noqa: BLE001
+        _co_bang_nguoi_nhan = False
+
+    if not _co_bang_nguoi_nhan:
+        print("⚠️  [ThôngBáo] Chưa có bảng tbl_ThongBao_NguoiNhan — danh sách thông "
+              "báo sẽ chậm (~5 giây mỗi lượt).")
+        print("    Chạy: python sql/chay_kich_ban.py "
+              "sql/2026-08-19_bang_nguoi_nhan_thong_bao.sql")
+    return _co_bang_nguoi_nhan
+
+
+def _dieu_kien_nguoi_nhan_thongbao(cursor) -> str:
+    """Điều kiện người nhận cho tbl_ThongBao. Một tham số: mã người dùng.
+
+    Đây là bảng CHẬM: cột IdNguoiHocs trung bình 263.948 ký tự, tổng ~240 MB,
+    và mỗi lượt mở danh sách quét lại toàn bộ — 5,02 giây cho một người. Nên nó
+    được tách sẵn ra bảng tbl_ThongBao_NguoiNhan có chỉ mục: còn 0,01 giây.
+
+    Bảng đó do trigger giữ đồng bộ, xem sql/2026-08-19_dong_bo_nguoi_nhan.sql.
+    """
+    if _kiem_tra_bang_nguoi_nhan(cursor):
+        return ("EXISTS (SELECT 1 FROM tbl_ThongBao_NguoiNhan nn "
+                "WHERE nn.Nguon = 'THONGBAO' AND nn.ThongBaoId = t.Id "
+                "AND nn.MaNguoiNhan = ?)")
+    # Đường lui khi máy chủ chưa chạy kịch bản tạo bảng: vẫn phải ĐÚNG, nên
+    # dùng dấu phân cách chứ không quay lại LIKE '%mã%'.
+    return "(',' + CAST(t.IdNguoiHocs AS NVARCHAR(MAX)) + ',') LIKE ?"
+
+
+def _tham_so_thongbao(cursor, ma: str) -> str:
+    return ma if _kiem_tra_bang_nguoi_nhan(cursor) else f"%,{ma},%"
+
+
+# tbl_Notification_Queue thì KHÔNG cần bảng phụ:
+#
+#   • Đo được 0,01 giây — cột IdNguoiHocs ở bảng này nhỏ, không phải chỗ chậm.
+#   • Và không thể gắn trigger cho nó: SQL Server cấm `OUTPUT INSERTED.<cột>`
+#     (dạng không có INTO) trên bảng có trigger, mà ba API gửi thông báo đang
+#     dùng đúng cú pháp đó. Gắn trigger là gửi thông báo hỏng ngay.
+#
+# Nhưng lỗi khớp nhầm chuỗi con thì vẫn phải sửa: bọc hai đầu bằng dấu phẩy để
+# `1679` không còn khớp vào giữa mã `205714023110061`.
+DIEU_KIEN_NGUOI_NHAN_QUEUE = "(',' + CAST(q.IdNguoiHocs AS NVARCHAR(MAX)) + ',') LIKE ?"
+
+
+def _tham_so_queue(ma: str) -> str:
+    return f"%,{ma},%"
+
+
 def _ma_duoc_phep_mem(ma_yeu_cau, me: Optional[Identity], ten_api: str) -> str:
     """Như _ma_sinh_vien_duoc_phep nhưng chịu được máy khách bản cũ."""
     if me is not None:
@@ -497,6 +582,13 @@ async def api_get_notifs(student_id: str, page: int = 1,
         with pyodbc.connect(REMOTE_CONN_STR, autocommit=True) as conn:
             cursor = conn.cursor()
             
+            # Hai nguồn dữ liệu, hai cách kiểm người nhận khác nhau — lý do
+            # xem phần chú thích ở đầu tệp, cạnh DIEU_KIEN_NGUOI_NHAN_QUEUE.
+            dk_queue = DIEU_KIEN_NGUOI_NHAN_QUEUE
+            dk_thongbao = _dieu_kien_nguoi_nhan_thongbao(cursor)
+            ts_queue = _tham_so_queue(sid_clean)
+            ts_thongbao = _tham_so_thongbao(cursor, sid_clean)
+
             extra_filter = "AND ISNULL(q.Category, '') <> 'CHAT_GROUP' AND ISNULL(q.Scope, '') <> 'CHAT_PUSH_ONLY'"
             if is_staff:
                 extra_filter += " AND q.Category NOT IN ('VAN_BAN', 'VAN_BAN_PHAP_QUY', 'CONG_VAN', 'GENERAL', 'THONG_BAO', 'THONG_BAO_CHUNG')"
@@ -531,7 +623,7 @@ async def api_get_notifs(student_id: str, page: int = 1,
                     
                     WHERE (
                         REPLACE(REPLACE(UPPER(RTRIM(q.StudentId)), 'SV', ''), 'CB', '') = ? 
-                        OR CAST(q.IdNguoiHocs AS NVARCHAR(MAX)) LIKE ? 
+                        OR {dk_queue}
                         OR q.StudentId = 'ALL'
                     )
                     AND q.IsSent = 1
@@ -551,7 +643,7 @@ async def api_get_notifs(student_id: str, page: int = 1,
                     LEFT JOIN tbl_Notification_Read_Status r ON t.Id = r.NotifID 
                         AND REPLACE(REPLACE(UPPER(RTRIM(r.StudentId)), 'SV', ''), 'CB', '') = ?
                     WHERE t.IsDeleted = 0 
-                    AND (CAST(t.IdNguoiHocs AS NVARCHAR(MAX)) LIKE ? OR t.IdLoaiThongBao = 2)
+                    AND ({dk_thongbao} OR t.IdLoaiThongBao = 2)
                     AND t.Id NOT IN (SELECT h.NotifID FROM tbl_Notification_Hides h WHERE h.StudentId = ?)
                 )
                 SELECT * FROM CombinedNotifs
@@ -559,11 +651,11 @@ async def api_get_notifs(student_id: str, page: int = 1,
                 OFFSET ? ROWS FETCH NEXT ? ROWS ONLY;
             """
             
-            # 🔥 Cập nhật List Parameter cho đủ dấu ?
+            # Thứ tự phải khớp đúng từng dấu ? trong câu SQL bên trên.
             final_params = [
-                sid_clean, sid_clean, # 2 param mới cho LEFT JOIN nguồn 1
-                sid_clean, sid_wildcard, sid_clean, # 3 param cũ của Where Nguồn 1
-                sid_clean, sid_wildcard, sid_clean, # 3 param cũ của Nguồn 2
+                sid_clean, sid_clean,               # hai LEFT JOIN của nguồn 1
+                sid_clean, ts_queue, sid_clean,     # WHERE của nguồn 1 (Queue)
+                sid_clean, ts_thongbao, sid_clean,  # nguồn 2 (ThongBao)
                 offset, page_size
             ]
             
@@ -1336,19 +1428,24 @@ async def mark_all_read(student_id: str,
         with pyodbc.connect(REMOTE_CONN_STR, autocommit=True) as conn:
             cursor = conn.cursor()
 
+            dk_queue = DIEU_KIEN_NGUOI_NHAN_QUEUE
+            dk_thongbao = _dieu_kien_nguoi_nhan_thongbao(cursor)
+            ts_queue = _tham_so_queue(sid_clean)
+            ts_thongbao = _tham_so_thongbao(cursor, sid_clean)
+
             # 1a. Tin từ hàng đợi (nguồn 1 của get-notifs)
             #
             # Chỉ lấy tin thực sự thuộc về người này, giống hệt điều kiện WHERE
             # của get-notifs — nếu quét cả bảng thì sẽ chèn hàng chục nghìn dòng
             # rác cho mỗi lần bấm nút.
-            sql_queue = """
+            sql_queue = f"""
                 INSERT INTO tbl_Notification_Read_Status (NotifID, StudentId, ReadAt)
                 SELECT q.Id, ?, GETDATE()
                 FROM tbl_Notification_Queue q
                 WHERE q.IsSent = 1
                   AND (
                         REPLACE(REPLACE(UPPER(RTRIM(q.StudentId)), 'SV', ''), 'CB', '') = ?
-                     OR CAST(q.IdNguoiHocs AS NVARCHAR(MAX)) LIKE ?
+                     OR {dk_queue}
                      OR q.StudentId = 'ALL'
                   )
                   AND NOT EXISTS (
@@ -1356,8 +1453,7 @@ async def mark_all_read(student_id: str,
                         WHERE r.NotifID = q.Id AND r.StudentId = ?
                   )
             """
-            like_sid = f"%{sid_clean}%"
-            cursor.execute(sql_queue, (sid_clean, sid_clean, like_sid, sid_clean))
+            cursor.execute(sql_queue, (sid_clean, sid_clean, ts_queue, sid_clean))
             so_tin_chung = cursor.rowcount
 
             # 1b. Tin từ tbl_ThongBao (NGUỒN 2 của get-notifs).
@@ -1366,18 +1462,18 @@ async def mark_all_read(student_id: str,
             # đọc CHỈ dựa vào tbl_Notification_Read_Status, nên bỏ qua nó thì
             # toàn bộ tin ở tab VINHUNI vẫn hiện là chưa đọc sau khi người dùng
             # bấm "Đánh dấu tất cả đã đọc".
-            sql_thongbao = """
+            sql_thongbao = f"""
                 INSERT INTO tbl_Notification_Read_Status (NotifID, StudentId, ReadAt)
                 SELECT t.Id, ?, GETDATE()
                 FROM tbl_ThongBao t
                 WHERE t.IsDeleted = 0
-                  AND (CAST(t.IdNguoiHocs AS NVARCHAR(MAX)) LIKE ? OR t.IdLoaiThongBao = 2)
+                  AND ({dk_thongbao} OR t.IdLoaiThongBao = 2)
                   AND NOT EXISTS (
                         SELECT 1 FROM tbl_Notification_Read_Status r
                         WHERE r.NotifID = t.Id AND r.StudentId = ?
                   )
             """
-            cursor.execute(sql_thongbao, (sid_clean, like_sid, sid_clean))
+            cursor.execute(sql_thongbao, (sid_clean, ts_thongbao, sid_clean))
             so_tin_thongbao = cursor.rowcount
 
             # 2. Tin cá nhân và tin nhóm
