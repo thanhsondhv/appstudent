@@ -348,12 +348,211 @@ def job_dong_bo_ho_so_can_bo():
 scheduler = AsyncIOScheduler()
 
 # 1. Chu kỳ quét tổng hợp (Lịch tuần + Odoo + Delta SQL) - 30 phút/lần
+
+# ===========================================================================
+# Thông báo tự động theo sự kiện — sinh nhật và ngày lễ
+# ===========================================================================
+#
+# Thêm 19/08/2026. Ứng dụng đã có màn hình "TỰ ĐỘNG & SỰ KIỆN" từ trước với hai
+# công tắc, nhưng phía máy chủ không có gì cả — bật lên rồi chẳng bao giờ gửi.
+# Đây là phần còn thiếu đó.
+#
+# Nguyên tắc:
+#   • Chỉ gửi cho người CÒN CÀI ỨNG DỤNG. Cơ sở dữ liệu không phân biệt được
+#     sinh viên đang học với người đã tốt nghiệp (cả 61.974 tài khoản đều
+#     IsActive = 1), nên "có thiết bị đang hoạt động" là bộ lọc đúng và tự
+#     nhiên nhất: người đã gỡ ứng dụng vốn không nhận được gì.
+#   • Mỗi người mỗi năm đúng MỘT lời chúc cho mỗi loại. Tác vụ chạy mỗi giờ và
+#     có thể chạy lại sau khi khởi động lại máy chủ, nên phải chống gửi trùng.
+#   • Tôn trọng ai đã tắt loại thông báo này trong phần cài đặt.
+
+MA_LOAI_TU_DONG = "CA_NHAN"   # để tin rơi vào tab "Cá nhân" của ứng dụng
+
+
+def _lay_cau_hinh_tu_dong(cursor, ma_cau_hinh):
+    """Đọc một cấu hình. Trả None nếu chưa bật hoặc chưa có bảng."""
+    try:
+        r = cursor.execute(
+            "SELECT TieuDe, NoiDung, GioGui FROM tbl_ThongBao_TuDong "
+            "WHERE MaCauHinh = ? AND BatTat = 1", ma_cau_hinh).fetchone()
+    except Exception as e:  # noqa: BLE001 — chưa chạy kịch bản tạo bảng
+        print(f"⏭️  [TựĐộng] Chưa có bảng cấu hình ({str(e)[:60]})")
+        return None
+    return r
+
+
+def _gui_loi_chuc(cursor, ma_cau_hinh, tieu_de_mau, noi_dung_mau, nguoi_nhan):
+    """Nạp lời chúc vào hàng đợi thông báo. Trả về số người thực sự được gửi."""
+    nam = datetime.now().year
+    da_gui = 0
+
+    for ma_nguoi, ho_ten, tieu_de_rieng in nguoi_nhan:
+        ten = (ho_ten or "bạn").strip()
+        tieu_de = (tieu_de_rieng or tieu_de_mau).replace("{ten}", ten)
+        noi_dung = noi_dung_mau.replace("{ten}", ten)
+        if tieu_de_rieng:
+            tieu_de = tieu_de_rieng
+            noi_dung = noi_dung_mau.replace("{ten}", ten)
+
+        try:
+            ma_tin = cursor.execute("""
+                INSERT INTO tbl_Notification_Queue
+                  (StudentId, Title, Body, Category, Summary, IsSent, CreatedAt,
+                   IsRead, Sender, SenderId, Scope, IdNguoiHocs)
+                OUTPUT INSERTED.ID
+                VALUES (?, ?, ?, ?, ?, 1, GETDATE(), 0, N'Trường Đại học Vinh',
+                        '0', 'TU_DONG', ?)
+            """, (ma_nguoi, tieu_de, noi_dung, MA_LOAI_TU_DONG,
+                  noi_dung[:200], ma_nguoi)).fetchval()
+
+            cursor.execute("""
+                INSERT INTO tbl_ThongBao_TuDong_Log
+                    (MaCauHinh, MaNguoiNhan, Nam, MaThongBao)
+                VALUES (?, ?, ?, ?)
+            """, (ma_cau_hinh, ma_nguoi, nam, ma_tin))
+            da_gui += 1
+        except Exception as e:  # noqa: BLE001
+            # Một người hỏng thì bỏ qua người đó, không làm hỏng cả mẻ
+            print(f"⚠️  [TựĐộng] Không gửi được cho {ma_nguoi}: {str(e)[:80]}")
+
+    return da_gui
+
+
+def job_chuc_mung_sinh_nhat():
+    """Gửi lời chúc cho những người sinh nhật hôm nay."""
+    gio_hien_tai = datetime.now().hour
+    try:
+        with get_db_conn() as conn:
+            cursor = conn.cursor()
+
+            cau_hinh = _lay_cau_hinh_tu_dong(cursor, "SINH_NHAT")
+            if not cau_hinh:
+                return
+            tieu_de_mau, noi_dung_mau, gio_gui = cau_hinh
+            if gio_hien_tai != int(gio_gui):
+                return
+
+            nguoi_nhan = cursor.execute("""
+                SELECT DISTINCT
+                    REPLACE(REPLACE(UPPER(RTRIM(u.UserCode)), 'SV', ''), 'CB', ''),
+                    u.FullName,
+                    CAST(NULL AS NVARCHAR(300))
+                FROM tbl_users u
+                WHERE u.Birthday IS NOT NULL
+                  AND MONTH(u.Birthday) = MONTH(GETDATE())
+                  AND DAY(u.Birthday)   = DAY(GETDATE())
+                  AND u.IsActive = 1
+                  -- chỉ người còn cài ứng dụng
+                  AND EXISTS (
+                        SELECT 1 FROM tbl_FCM_Tokens t
+                        WHERE REPLACE(REPLACE(UPPER(RTRIM(t.StudentId)), 'SV', ''), 'CB', '')
+                              = REPLACE(REPLACE(UPPER(RTRIM(u.UserCode)), 'SV', ''), 'CB', '')
+                          AND t.IsActive = 1)
+                  -- năm nay chưa gửi
+                  AND NOT EXISTS (
+                        SELECT 1 FROM tbl_ThongBao_TuDong_Log g
+                        WHERE g.MaCauHinh = 'SINH_NHAT'
+                          AND g.Nam = YEAR(GETDATE())
+                          AND g.MaNguoiNhan
+                              = REPLACE(REPLACE(UPPER(RTRIM(u.UserCode)), 'SV', ''), 'CB', ''))
+                  -- người đã tắt loại thông báo này thì tôn trọng
+                  AND NOT EXISTS (
+                        SELECT 1 FROM tbl_Notification_User_Settings s
+                        WHERE s.UserId
+                              = REPLACE(REPLACE(UPPER(RTRIM(u.UserCode)), 'SV', ''), 'CB', '')
+                          AND s.Category = 'SINH_NHAT' AND s.IsEnabled = 0)
+            """).fetchall()
+
+            if not nguoi_nhan:
+                return
+
+            n = _gui_loi_chuc(cursor, "SINH_NHAT", tieu_de_mau, noi_dung_mau, nguoi_nhan)
+            conn.commit()
+            print(f"🎂 [TựĐộng] Đã gửi lời chúc sinh nhật cho {n}/{len(nguoi_nhan)} người")
+    except Exception as e:  # noqa: BLE001
+        print(f"🔥 [TựĐộng] Lỗi gửi lời chúc sinh nhật: {str(e)[:150]}")
+
+
+def job_chuc_mung_ngay_le():
+    """Gửi lời chúc vào các ngày lễ đã khai trong tbl_NgayLe."""
+    bay_gio = datetime.now()
+    try:
+        with get_db_conn() as conn:
+            cursor = conn.cursor()
+
+            cau_hinh = _lay_cau_hinh_tu_dong(cursor, "NGAY_LE")
+            if not cau_hinh:
+                return
+            _, noi_dung_mau, gio_gui = cau_hinh
+            if bay_gio.hour != int(gio_gui):
+                return
+
+            ngay_le = cursor.execute("""
+                SELECT TenNgay, DoiTuong FROM tbl_NgayLe
+                WHERE BatTat = 1 AND Ngay = ? AND Thang = ?
+            """, (bay_gio.day, bay_gio.month)).fetchall()
+
+            if not ngay_le:
+                return
+
+            for ten_ngay, doi_tuong in ngay_le:
+                loc_vai_tro = ""
+                if str(doi_tuong).upper() == "CB":
+                    loc_vai_tro = ("AND UPPER(ISNULL(u.UserRole, '')) NOT IN "
+                                   "('SINHVIEN', 'SV', 'STUDENT')")
+                elif str(doi_tuong).upper() == "SV":
+                    loc_vai_tro = ("AND UPPER(ISNULL(u.UserRole, '')) IN "
+                                   "('SINHVIEN', 'SV', 'STUDENT')")
+
+                ma_moc = f"NGAY_LE_{bay_gio.day:02d}{bay_gio.month:02d}"
+                nguoi_nhan = cursor.execute(f"""
+                    SELECT DISTINCT
+                        REPLACE(REPLACE(UPPER(RTRIM(u.UserCode)), 'SV', ''), 'CB', ''),
+                        u.FullName,
+                        CAST(? AS NVARCHAR(300))
+                    FROM tbl_users u
+                    WHERE u.IsActive = 1
+                      {loc_vai_tro}
+                      AND EXISTS (
+                            SELECT 1 FROM tbl_FCM_Tokens t
+                            WHERE REPLACE(REPLACE(UPPER(RTRIM(t.StudentId)), 'SV', ''), 'CB', '')
+                                  = REPLACE(REPLACE(UPPER(RTRIM(u.UserCode)), 'SV', ''), 'CB', '')
+                              AND t.IsActive = 1)
+                      AND NOT EXISTS (
+                            SELECT 1 FROM tbl_ThongBao_TuDong_Log g
+                            WHERE g.MaCauHinh = ?
+                              AND g.Nam = YEAR(GETDATE())
+                              AND g.MaNguoiNhan
+                                  = REPLACE(REPLACE(UPPER(RTRIM(u.UserCode)), 'SV', ''), 'CB', ''))
+                      AND NOT EXISTS (
+                            SELECT 1 FROM tbl_Notification_User_Settings s
+                            WHERE s.UserId
+                                  = REPLACE(REPLACE(UPPER(RTRIM(u.UserCode)), 'SV', ''), 'CB', '')
+                              AND s.Category = 'NGAY_LE' AND s.IsEnabled = 0)
+                """, (ten_ngay, ma_moc)).fetchall()
+
+                if not nguoi_nhan:
+                    continue
+
+                n = _gui_loi_chuc(cursor, ma_moc, ten_ngay, noi_dung_mau, nguoi_nhan)
+                conn.commit()
+                print(f"🎉 [TựĐộng] {ten_ngay}: đã gửi cho {n}/{len(nguoi_nhan)} người")
+    except Exception as e:  # noqa: BLE001
+        print(f"🔥 [TựĐộng] Lỗi gửi lời chúc ngày lễ: {str(e)[:150]}")
+
+
 scheduler.add_job(job_full_sync_cycle, 'interval', minutes=30, next_run_time=datetime.now())
 
 # 2. Quét nhắc lịch khẩn - 5 phút/lần
 scheduler.add_job(job_reminder_30min, 'interval', minutes=5, next_run_time=datetime.now())
 
 # 3. Mốc giờ cố định sinh Bản tin sáng/chiều (Tự động bốc thời tiết & âm lịch)
+# Thông báo tự động: chạy mỗi giờ, tự bỏ qua nếu chưa tới giờ đã cấu hình.
+# Chạy theo giờ thay vì đặt cứng một mốc để đổi giờ gửi trong ứng dụng là có
+# hiệu lực ngay, không phải khởi động lại tiến trình.
+scheduler.add_job(job_chuc_mung_sinh_nhat, 'cron', minute=5)
+scheduler.add_job(job_chuc_mung_ngay_le, 'cron', minute=10)
+
 scheduler.add_job(job_daily_summary, 'cron', hour=6, minute=30, args=['MORNING'])
 scheduler.add_job(job_daily_summary, 'cron', hour=13, minute=0, args=['AFTERNOON'])
 

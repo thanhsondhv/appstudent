@@ -84,7 +84,7 @@ class _NotificationPortalScreenState extends State<NotificationPortalScreen> {
 
             // 5. CẤU HÌNH TỰ ĐỘNG: Cài đặt hệ thống chỉ dành cho Admin hoặc AD
             if (isAdmin)
-              _buildCard(context, "Cấu hình", Icons.settings_suggest_rounded, Colors.indigo, AutomatedNotifScreen()),
+              _buildCard(context, "Cấu hình", Icons.settings_suggest_rounded, Colors.indigo, const AutomatedNotifScreen()),
             
             // 6. Lịch sử tin: Cho phép mọi cán bộ xem lại lịch sử để theo dõi Watchdog cá nhân
             _buildCard(context, "Lịch sử tin", Icons.history_edu_rounded, Colors.teal, const NotificationHistoryScreen()),

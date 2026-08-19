@@ -92,3 +92,4 @@ lunar-python>=1.3          # sync_and_notify_worker_new.py, vinhuni_data_collect
 faster-whisper>=1.0        # services/whisper_service.py — chuyển giọng nói thành văn bản
 langchain-text-splitters>=0.2  # vinhuni_ai_docs/service.py — cắt văn bản dài cho AI
 sentence-transformers>=2.2 # vinhuni_notifications/router.py, chuyenpdf_vector.py — vector ngữ nghĩa
+rookiepy>=0.5          # sync_and_notify_worker_new.py — đọc cookie trình duyệt khi thu thập dữ liệu
