@@ -27,12 +27,17 @@ from pathlib import Path
 GOC = Path(__file__).resolve().parent.parent
 BO_QUA = {"venv", "_luu_tru", "__pycache__", "node_modules", ".git", "tests"}
 
-# Những endpoint có await thật sự (gọi HTTP ngoài, đọc tệp tải lên). Chúng buộc
-# phải là async; phần truy vấn bên trong nên đẩy sang luồng riêng — việc đó chưa
-# làm nên tạm chấp nhận, nhưng ghi tên ra đây để không quên.
-CHUA_XU_LY = {
-    "verify_student", "search_face_1n", "login_face_gateway", "auth_callback",
-    "api_login", "login_face_pro", "update_face_vector",
+# Endpoint buộc phải `async` (gọi HTTP ngoài, đọc tệp tải lên) mà phần truy vấn
+# CHƯA đẩy sang luồng riêng.
+#
+# Danh sách này chỉ để biết còn nợ gì — bài kiểm tra KHÔNG tin vào nó. Nó xét
+# mã nguồn: endpoint async có gọi run_in_threadpool thì coi là đã xử lý.
+#
+# Bản đầu của bài này dùng danh sách cứng, nên sau khi sửa xong bốn endpoint mà
+# nó vẫn báo y như cũ — một phép thử không phản ánh thực tế thì vô dụng.
+CON_NO = {
+    "auth_callback": "đăng nhập Office 365 — hai khối truy vấn xen kẽ",
+    "login_face_pro": "đăng nhập bằng khuôn mặt — hai khối truy vấn xen kẽ",
 }
 
 
@@ -55,8 +60,17 @@ def _co_truy_van(nut: ast.AST) -> bool:
     )
 
 
+def _da_day_sang_luong_rieng(nut: ast.AST) -> bool:
+    """Hàm async này có gọi run_in_threadpool không."""
+    return any(
+        isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+        and c.func.id == "run_in_threadpool"
+        for c in ast.walk(nut)
+    )
+
+
 def chay() -> int:
-    vi_pham, tam_chap_nhan, dat = [], [], 0
+    vi_pham, con_no, dat, da_xu_ly = [], [], 0, []
 
     for tep in GOC.rglob("*.py"):
         if BO_QUA & set(tep.relative_to(GOC).parts):
@@ -77,17 +91,22 @@ def chay() -> int:
                 continue
 
             cho = f"{tep.relative_to(GOC)}:{nut.lineno}  {nut.name}"
-            if nut.name in CHUA_XU_LY:
-                tam_chap_nhan.append(cho)
+
+            if _da_day_sang_luong_rieng(nut):
+                da_xu_ly.append(cho)
+            elif nut.name in CON_NO:
+                con_no.append(f"{cho}  — {CON_NO[nut.name]}")
             else:
                 vi_pham.append(cho)
 
-    print(f"  ✅ {dat} endpoint viết đúng kiểu `def` (FastAPI tự đẩy sang luồng riêng)")
+    print(f"  ✅ {dat} endpoint viết `def` (FastAPI tự đẩy sang luồng riêng)")
+    print(f"  ✅ {len(da_xu_ly)} endpoint async đã đẩy truy vấn sang luồng riêng:")
+    for c in da_xu_ly:
+        print(f"       {c}")
 
-    if tam_chap_nhan:
-        print(f"\n  ⚠️  {len(tam_chap_nhan)} endpoint buộc phải async (gọi HTTP ngoài, "
-              f"đọc tệp tải lên) — phần truy vấn CHƯA đẩy sang luồng riêng:")
-        for c in tam_chap_nhan:
+    if con_no:
+        print(f"\n  ⚠️  {len(con_no)} endpoint còn nợ — buộc phải async, chưa xử lý:")
+        for c in con_no:
             print(f"       {c}")
 
     if not vi_pham:
@@ -99,8 +118,8 @@ def chay() -> int:
     for c in vi_pham:
         print(f"     {c}")
     print("\n  Một truy vấn chậm ở những chỗ này chặn TOÀN BỘ máy chủ.")
-    print("  Sửa: bỏ chữ `async` nếu thân hàm không có `await`; nếu có thì đẩy")
-    print("  phần truy vấn sang luồng riêng (starlette.concurrency.run_in_threadpool).")
+    print("  Sửa: bỏ chữ `async` nếu thân hàm không có `await`; nếu có thì tách")
+    print("  phần truy vấn thành hàm lồng rồi gọi qua run_in_threadpool.")
     return 1
 
 

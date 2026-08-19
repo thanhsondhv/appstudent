@@ -504,45 +504,51 @@ async def login_face_gateway(
         
         # 3. Xử lý khi AI nhận diện thành công
         if ai_resp.get("status") == "SUCCESS" and "student_id" in ai_resp:
-             with pyodbc.connect(REMOTE_CONN_STR) as conn:
-                cursor = conn.cursor()
-                sid = ai_resp["student_id"]
+             # ⚠️ SỬA 19/08/2026: đẩy phần truy vấn sang LUỒNG RIÊNG.
+             # pyodbc là thư viện đồng bộ; để trong `async def` là nó chạy trên
+             # vòng lặp sự kiện và một truy vấn chậm chặn CẢ máy chủ.
+             def _lay_ho_so_sau_nhan_dien():
+                 with pyodbc.connect(REMOTE_CONN_STR) as conn:
+                    cursor = conn.cursor()
+                    sid = ai_resp["student_id"]
                 
-                # Truy vấn thông tin chi tiết từ bảng Users nội bộ
-                cursor.execute("""
-                    SELECT FullName, UserRole, FacultyName, UserType 
-                    FROM tbl_Users 
-                    WHERE UserCode = ? OR UserCode = 'SV' + ? OR UserCode = 'CB' + ?
-                """, (sid, sid, sid))
-                row = cursor.fetchone()
+                    # Truy vấn thông tin chi tiết từ bảng Users nội bộ
+                    cursor.execute("""
+                        SELECT FullName, UserRole, FacultyName, UserType 
+                        FROM tbl_Users 
+                        WHERE UserCode = ? OR UserCode = 'SV' + ? OR UserCode = 'CB' + ?
+                    """, (sid, sid, sid))
+                    row = cursor.fetchone()
                 
-                if row:
-                    db_role_raw = str(row.UserRole).strip() if row.UserRole else ""
-                    db_user_code = str(sid).strip().upper()
-                    user_type = row.UserType
+                    if row:
+                        db_role_raw = str(row.UserRole).strip() if row.UserRole else ""
+                        db_user_code = str(sid).strip().upper()
+                        user_type = row.UserType
 
-                    # --- LOGIC PHÂN QUYỀN THÔNG MINH ---
-                    # Ép Role chuẩn dựa trên ID (CB...) hoặc UserType trong DB
-                    if db_role_raw == "CanBo" or db_user_code.startswith("CB") or user_type == 1 or (db_user_code.isdigit() and len(db_user_code) < 6):
-                        final_role = "CanBo"
-                    else:
-                        final_role = "SinhVien"
+                        # --- LOGIC PHÂN QUYỀN THÔNG MINH ---
+                        # Ép Role chuẩn dựa trên ID (CB...) hoặc UserType trong DB
+                        if db_role_raw == "CanBo" or db_user_code.startswith("CB") or user_type == 1 or (db_user_code.isdigit() and len(db_user_code) < 6):
+                            final_role = "CanBo"
+                        else:
+                            final_role = "SinhVien"
 
-                    # 🔥 BƯỚC QUAN TRỌNG NHẤT: Tạo JWT Token cho hệ thống
-                    # Hàm create_access_token lấy từ auth/jwt_handler.py
-                    system_token = create_access_token(user_id=db_user_code, role=final_role, method="FaceID")
+                        # 🔥 BƯỚC QUAN TRỌNG NHẤT: Tạo JWT Token cho hệ thống
+                        # Hàm create_access_token lấy từ auth/jwt_handler.py
+                        system_token = create_access_token(user_id=db_user_code, role=final_role, method="FaceID")
 
-                    # Đóng gói dữ liệu trả về cho App Flutter
-                    ai_resp["user_data"] = {
-                        "student_id": clean_student_id(sid),
-                        "full_name": row.FullName,
-                        "user_role": final_role,
-                        "role": final_role,
-                        "faculty": row.FacultyName,
-                        "access_token": system_token  # 🔑 Chìa khóa để App mở Menu/GPA
-                    }
+                        # Đóng gói dữ liệu trả về cho App Flutter
+                        ai_resp["user_data"] = {
+                            "student_id": clean_student_id(sid),
+                            "full_name": row.FullName,
+                            "user_role": final_role,
+                            "role": final_role,
+                            "faculty": row.FacultyName,
+                            "access_token": system_token  # 🔑 Chìa khóa để App mở Menu/GPA
+                        }
                     
-                    print(f"📸 [FACE LOGIN] Thành công: {row.FullName} | Role: {final_role}")
+                        print(f"📸 [FACE LOGIN] Thành công: {row.FullName} | Role: {final_role}")
+
+             await run_in_threadpool(_lay_ho_so_sau_nhan_dien)
         
         return ai_resp
 
@@ -1533,15 +1539,20 @@ async def update_face_vector(
         face_vector = np.array(ai_result["vector"], dtype=np.float32).tobytes()
 
         # Bước 3: Lưu vào bảng tbl_Users (Cột Vector_bin)
-        with pyodbc.connect(REMOTE_CONN_STR) as conn:
-            cursor = conn.cursor()
-            sql_update = """
-                UPDATE tbl_Users 
-                SET Vector_bin = ?, LastSync = GETDATE() 
-                WHERE UserCode = ? OR UserCode = 'SV' + ? OR UserCode = 'CB' + ?
-            """
-            cursor.execute(sql_update, (pyodbc.Binary(face_vector), student_id, student_id, student_id))
-            conn.commit()
+        # ⚠️ SỬA 19/08/2026: đẩy truy vấn sang luồng riêng — pyodbc là thư
+        # viện đồng bộ, để trong `async def` là chặn cả vòng lặp sự kiện.
+        def _ghi_vector_khuon_mat():
+            with pyodbc.connect(REMOTE_CONN_STR) as conn:
+                cursor = conn.cursor()
+                sql_update = """
+                    UPDATE tbl_Users 
+                    SET Vector_bin = ?, LastSync = GETDATE() 
+                    WHERE UserCode = ? OR UserCode = 'SV' + ? OR UserCode = 'CB' + ?
+                """
+                cursor.execute(sql_update, (pyodbc.Binary(face_vector), student_id, student_id, student_id))
+                conn.commit()
+
+        await run_in_threadpool(_ghi_vector_khuon_mat)
 
         return {"status": "SUCCESS", "message": "Cập nhật khuôn mặt thành công!"}
 
