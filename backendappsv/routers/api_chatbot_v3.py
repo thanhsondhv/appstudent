@@ -11,6 +11,7 @@ from datetime import datetime
 from fastapi.responses import JSONResponse
 from auth.jwt_handler import get_current_user, Identity
 from core.ai_guard import ai_guard, AiGuardError
+from services.embedding_service import LoiTroLyAI  # trợ lý AI không dùng được
 
 router = APIRouter(prefix="/api/chatbot-v3")
 
@@ -100,6 +101,10 @@ async def chat_v3(
     me: Identity = Depends(get_current_user),
 ):
     user_msg = chat_req.get("message", "").strip()
+
+    # Ghi lại nếu trợ lý AI không dùng được, để nói đúng lý do ở cuối thay vì
+    # trả một câu chung chung. Xem services/embedding_service.py.
+    loi_tro_ly = None
 
     # ⚠️ SỬA LỖ HỔNG NGHIÊM TRỌNG (18/08/2026)
     # Bản cũ:  raw_sid = chat_req.get("studentId") or request.session.get("user_id")
@@ -209,7 +214,16 @@ async def chat_v3(
 
     # 2. Nếu không phải tốt nghiệp, mới tìm SQL Knowledge
     if db_data == "Chưa có dữ liệu cụ thể.":
-        known_match = db_service.search_sql_knowledge_hybrid(user_msg, chatbot_service.embedding.get_embedding(user_msg), user_role)
+        # Tìm theo ngữ nghĩa cần gọi OpenAI. Không dùng được thì BỎ QUA bước
+        # này chứ không làm hỏng cả câu trả lời — phần dữ liệu tra thẳng từ cơ
+        # sở dữ liệu bên trên vẫn còn nguyên giá trị.
+        known_match = None
+        try:
+            vector = chatbot_service.embedding.get_embedding(user_msg)
+            known_match = db_service.search_sql_knowledge_hybrid(user_msg, vector, user_role)
+        except LoiTroLyAI as loi_ai:
+            print(f"⚠️ [V3] Bỏ qua tìm kiếm ngữ nghĩa: {loi_ai.thong_diep}")
+            loi_tro_ly = loi_ai
         # Trong api_chatbot_v3.py
         if known_match:
             sql_final = known_match['sql'].replace("{student_id}", clean_id).replace("{program_id}", str(current_program_id))
@@ -222,7 +236,16 @@ async def chat_v3(
                 db_data = f"[DANH SÁCH MÔN CHƯA HỌC]: {json.dumps(res, ensure_ascii=False, default=str)}"
 
     # 3. Tra cứu Quy chế (RAG)
-    rag_results = db_service.tool_search_documents_hybrid(user_msg, chatbot_service.embedding, target_role=user_role)
+    # Tra cứu quy chế cũng cần tạo vector, tức cũng cần OpenAI. Trợ lý không
+    # dùng được thì bỏ qua phần này chứ không làm hỏng cả câu trả lời — phần dữ
+    # liệu tra thẳng từ cơ sở dữ liệu bên trên vẫn dùng được.
+    rag_results = []
+    try:
+        rag_results = db_service.tool_search_documents_hybrid(
+            user_msg, chatbot_service.embedding, target_role=user_role)
+    except LoiTroLyAI as loi_ai:
+        print(f"⚠️ [V3] Bỏ qua tra cứu quy chế: {loi_ai.thong_diep}")
+        loi_tro_ly = loi_tro_ly or loi_ai
     # Loại tài liệu chứa câu ra lệnh trước khi đưa vào ngữ cảnh mô hình.
     # Kho tri thức do nhiều người tải lên; một tệp có dòng "bỏ qua mọi chỉ dẫn
     # trước đó" là đủ để mô hình làm theo nếu không lọc.
@@ -258,12 +281,51 @@ async def chat_v3(
        - Luôn kết thúc bằng một lời khuyên hoặc lời động viên phù hợp với tình hình học tập.
     """
     
-    try:
-        res = client.chat.completions.create(model=CHAT_MODEL_FAST, messages=[{"role": "system", "content": advisor_prompt}, {"role": "user", "content": user_msg}])
-        reply = res.choices[0].message.content
-    except Exception as exc:
-        print(f"⚠️ [V3] Lỗi gọi mô hình: {exc}")
-        reply = "Hệ thống đang đối chiếu dữ liệu, bạn vui lòng đợi nhé!"
+    # ⚠️ SỬA 19/08/2026: bản cũ bắt mọi lỗi rồi trả "Hệ thống đang đối chiếu dữ
+    # liệu, bạn vui lòng đợi nhé!" — một câu NÓI DỐI. Người dùng ngồi đợi một
+    # câu trả lời không bao giờ tới, và không ai biết trợ lý đang hỏng.
+    #
+    # Nhật ký 19/08/2026 cho thấy nguyên nhân thật là tài khoản OpenAI hết tín
+    # dụng (code: credit_balance_exhausted) — thứ mà người dùng có đợi bao lâu
+    # cũng vô ích, phải có người đi nạp tiền.
+    da_noi_ly_do = False
+    if client is None:
+        reply = ("Trợ lý AI chưa được cấu hình trên máy chủ. "
+                 "Vui lòng báo quản trị hệ thống.")
+        da_noi_ly_do = True
+    else:
+        try:
+            res = client.chat.completions.create(
+                model=CHAT_MODEL_FAST,
+                messages=[{"role": "system", "content": advisor_prompt},
+                          {"role": "user", "content": user_msg}],
+            )
+            reply = res.choices[0].message.content
+        except Exception as exc:  # noqa: BLE001
+            mo_ta = str(exc)
+            print(f"⚠️ [V3] Lỗi gọi mô hình: {mo_ta[:200]}")
+            if "insufficient_quota" in mo_ta or "credit_balance_exhausted" in mo_ta:
+                print("🔴 [TrợLýAI] Tài khoản OpenAI đã hết tín dụng.")
+                reply = ("Trợ lý AI tạm ngừng do tài khoản dịch vụ đã hết hạn mức. "
+                         "Vui lòng báo quản trị hệ thống. "
+                         "Các chức năng khác của ứng dụng vẫn dùng bình thường.")
+                da_noi_ly_do = True
+            elif "rate_limit" in mo_ta or "429" in mo_ta:
+                reply = "Trợ lý AI đang bận. Bạn vui lòng hỏi lại sau ít phút nhé."
+            elif "timeout" in mo_ta.lower():
+                reply = "Trợ lý AI phản hồi chậm. Bạn thử hỏi lại giúp mình nhé."
+            else:
+                reply = ("Trợ lý AI đang gặp sự cố nên chưa trả lời được câu này. "
+                         "Bạn thử lại sau ít phút giúp mình nhé.")
+
+    # Nếu các bước tra cứu đã hỏng mà câu trả lời chưa nói ra thì bổ sung — để
+    # người dùng không tưởng đây là câu trả lời đầy đủ.
+    #
+    # `da_noi_ly_do` tránh lặp: cả bước tra cứu lẫn bước gọi mô hình thường hỏng
+    # vì CÙNG một nguyên nhân, nếu không kiểm thì cùng một câu hiện hai lần.
+    if (loi_tro_ly is not None and loi_tro_ly.can_nguoi_quan_tri
+            and not da_noi_ly_do):
+        reply = f"{loi_tro_ly.thong_diep}\n\n{reply}"
 
     # Lọc câu trả lời: che khoá bí mật lỡ lọt ra, chặn câu lệnh SQL ghi dữ liệu,
     # nhắc người dùng khi câu trả lời chưa đối chiếu được với văn bản của trường.

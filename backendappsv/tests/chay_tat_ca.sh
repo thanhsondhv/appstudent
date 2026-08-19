@@ -45,19 +45,22 @@ muc "6. Module nội bộ / thư viện bị thiếu"
 # biên dịch — và vỡ đúng lúc cài mới lên máy chủ.
 python3 tests/kiem_tra_module_thieu.py || LOI=1
 
-muc "7. Phân quyền các endpoint thông báo"
+muc "7. Trợ lý AI báo đúng lý do khi hỏng"
+python3 tests/test_tro_ly_ai_het_han_muc.py || LOI=1
+
+muc "8. Phân quyền các endpoint thông báo"
 python3 tests/test_quyen_thong_bao.py || LOI=1
 
-muc "8. Hàng đợi thông báo (chia lô, đếm phần, lấy lại việc bỏ dở)"
+muc "9. Hàng đợi thông báo (chia lô, đếm phần, lấy lại việc bỏ dở)"
 python3 tests/test_hang_doi_thong_bao.py || LOI=1
 
-muc "9. Tích hợp với Redis thật (tự bỏ qua nếu không có Redis)"
+muc "10. Tích hợp với Redis thật (tự bỏ qua nếu không có Redis)"
 python3 tests/test_tich_hop_redis.py || LOI=1
 
-muc "10. Firebase (dry_run — không gửi gì; tự bỏ qua nếu thiếu khoá/CSDL)"
+muc "11. Firebase (dry_run — không gửi gì; tự bỏ qua nếu thiếu khoá/CSDL)"
 python3 tests/kiem_tra_firebase.py || LOI=1
 
-muc "11. Khoá bí mật lọt vào mã nguồn"
+muc "12. Khoá bí mật lọt vào mã nguồn"
 if grep -rEn "sk-proj-[A-Za-z0-9]|ITCdhv@|AI2025\\\\SQLEXPRESS|= *'sa'" \
      --include="*.py" . 2>/dev/null | grep -v __pycache__ | grep -v _luu_tru | grep -v tests/; then
   echo "   ❌ phát hiện khoá viết cứng"; LOI=1

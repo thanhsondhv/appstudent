@@ -137,6 +137,19 @@ class AuthService {
 
       if (response.statusCode == 200) {
         debugPrint("✅ [Webhook] Đã đăng ký máy bơm tin nhắn cho: $userCode");
+      } else if (response.statusCode == 404) {
+        // ⚠️ Ghi nhận 19/08/2026: máy chủ KHÔNG có endpoint này. Mọi lần đăng
+        // nhập đều gửi một yêu cầu chắc chắn hỏng, và bản cũ chỉ ghi log khi
+        // thành công nên chuyện đó vô hình suốt.
+        //
+        // Chưa gỡ lời gọi vì tính năng đồng bộ tin nhắn Teams còn dang dở
+        // (xem lib/services/teams_service.dart). Nhưng phải nói ra, để lần sau
+        // đọc nhật ký là biết đây là việc chưa làm xong chứ không phải lỗi.
+        debugPrint("ℹ️ [Webhook] Máy chủ chưa có /api/ms-webhook/subscribe — "
+            "đồng bộ tin nhắn Teams chưa bật. Bỏ qua, không ảnh hưởng đăng nhập.");
+      } else {
+        debugPrint("⚠️ [Webhook] Máy chủ trả ${response.statusCode} khi đăng ký "
+            "máy bơm tin nhắn cho $userCode");
       }
     } catch (e) {
       debugPrint("❌ [Webhook] Lỗi đăng ký: $e");
