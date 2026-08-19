@@ -90,35 +90,28 @@ Phải trả về `PONG`.
 
 ---
 
-## Bước 5a — Chép thư mục `models/` từ máy chủ về kho mã (BẮT BUỘC)
+## Bước 5a — Tải mô hình ngữ nghĩa (bắt buộc, làm một lần)
 
-Năm tệp import `models.chat_model` — `ChatMessage`, `ChatGroup`, `User`,
-`ChatMember`, `MessageAction`, `GroupKnowledge`:
+Thư mục `models/` có hai loại thứ khác hẳn nhau:
 
-* `routers/api_chatgroupv1.py`
-* `core/socket_manager.py`
-* `services/ai_service.py`
-* `services/chatgroup/message_service.py`
-* `services/chatgroup/member_service.py`
+* `chat_model.py`, `secretary_model.py` — **mã nguồn**, đã có sẵn trong git.
+* `models/notification_model/` — **mô hình tải về**, KHÔNG có trong git.
 
-Nhưng thư mục `models/` **chưa bao giờ được commit** — nó chỉ tồn tại trên máy
-chủ đang chạy. Kho mã hiện thiếu nó, nên cài mới ở bất kỳ máy nào khác là
-`Main.py` không nạp được và **cả backend không khởi động**.
+Mô hình đó nặng 449 MB. GitHub chặn cứng ở 100 MB mỗi tệp nên không đẩy lên
+được, và để trong git thì ai sao chép kho mã cũng phải tải trọn 453 MB.
 
-Việc cần làm, một lần:
+Nó tái tạo được bằng một lệnh:
 
 ```
-xcopy C:\đường\dẫn\hiện\tại\models  C:\kho-ma\backendappsv\models /E /I
-cd C:\kho-ma\backendappsv
-git add models
-git commit -m "Bo sung thu muc models con thieu trong kho ma"
+cd C:\đường\dẫn\backendappsv
+python tv.py
 ```
 
-Kiểm tra lại bằng:
+Lệnh này tải `paraphrase-multilingual-MiniLM-L12-v2` rồi lưu vào
+`./models/notification_model`. Cần mạng ra Internet.
 
-```
-python tests/kiem_tra_module_thieu.py
-```
+Thiếu bước này thì phần tìm kiếm thông báo theo ngữ nghĩa không chạy — các
+phần khác vẫn bình thường.
 
 ---
 
