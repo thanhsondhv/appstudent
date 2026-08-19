@@ -696,336 +696,20 @@ def api_get_notifs(student_id: str, page: int = 1,
 
 
         
-# @router.get("/get-notifs/{student_id}")
-# async def api_get_notifs(student_id: str, page: int = 1):
-    # page_size = 20 
-    # offset = (page - 1) * page_size
-    
-    # # 1. Làm sạch ID và xác định vai trò (is_staff)
-    # raw_id = str(student_id).strip().upper()
-    # # Logic nhận diện Cán bộ: Có chữ CB hoặc mã số nguyên bản <= 6 ký tự
-    # is_staff = "CB" in raw_id or len(raw_id.replace("SV", "").replace("CB", "")) <= 6 
-    
-    # sid_clean = raw_id.replace("SV", "").replace("CB", "")
-    # sid_wildcard = f"%{sid_clean}%"
-    
-    # try:
-        # with pyodbc.connect(REMOTE_CONN_STR, autocommit=True) as conn:
-            # cursor = conn.cursor()
-            
-            # # --- XÂY DỰNG NGUỒN DỮ LIỆU TAB 1 (GENERAL) DỰA THEO VAI TRÒ ---
-            # if is_staff:
-                # # NGUỒN CHO CÁN BỘ: Lấy từ thư viện văn bản nội bộ
-                # # Đặt LoaiTin là 'VAN_BAN_PHAP_QUY' để API Detail truy vấn đúng bảng Library
-                # sql_source_2 = """
-                    # SELECT 
-                        # CAST(d.DocId AS INT) as NotifId, 
-                        # N'📄 ' + ISNULL(d.LoaiVanBan, N'Văn bản') + N': ' + d.SoKyHieu as TieuDe, 
-                        # LEFT(d.TrichYeu, 150) as TomTat, 
-                        # d.TrichYeu as NoiDung, 
-                        # CAST(d.CreatedAt AS DATETIME) as NgayPhatHanh, 
-                        # CASE WHEN r.NotifID IS NOT NULL THEN 1 ELSE 0 END as IsRead, 
-                        # N'Hệ thống Điều hành' as NguoiDang,
-                        # 'VAN_BAN_PHAP_QUY' as LoaiTin,
-                        # 'GENERAL' as TabGroup -- Tab 1: VĂN BẢN
-                    # FROM tbl_Document_Library d
-                    # LEFT JOIN tbl_Notification_Read_Status r ON d.DocId = r.NotifID 
-                        # AND REPLACE(REPLACE(UPPER(RTRIM(r.StudentId)), 'SV', ''), 'CB', '') = ?
-                    # WHERE d.IsActive = 1 AND d.IsForStaff = 1
-                      # AND d.DocId NOT IN (SELECT h.NotifID FROM tbl_Notification_Hides h WHERE h.StudentId = ?)
-                # """
-                # source_2_params = (sid_clean, sid_clean)
-            # else:
-                # # NGUỒN CHO SINH VIÊN: Lấy từ bảng thông báo chung (tbl_ThongBao)
-                # sql_source_2 = """
-                    # SELECT 
-                        # CAST(t.Id AS INT) as NotifId, 
-                        # t.TieuDe, 
-                        # LEFT(CAST(t.NoiDung AS NVARCHAR(MAX)), 150) as TomTat, 
-                        # t.NoiDung, 
-                        # CAST(t.NgayPhatHanh AS DATETIME) as NgayPhatHanh, 
-                        # CASE WHEN r.NotifID IS NOT NULL THEN 1 ELSE 0 END as IsRead, 
-                        # N'Phòng ban' as NguoiDang,
-                        # 'GENERAL' as LoaiTin,
-                        # 'GENERAL' as TabGroup -- Tab 1: VINHUNI
-                    # FROM tbl_ThongBao t
-                    # LEFT JOIN tbl_Notification_Read_Status r ON t.Id = r.NotifID 
-                        # AND REPLACE(REPLACE(UPPER(RTRIM(r.StudentId)), 'SV', ''), 'CB', '') = ?
-                    # WHERE (CAST(t.IdNguoiHocs AS NVARCHAR(MAX)) LIKE ? OR t.IdLoaiThongBao = 2)
-                      # AND t.IsDeleted = 0 
-                      # AND t.Id NOT IN (SELECT h.NotifID FROM tbl_Notification_Hides h WHERE h.StudentId = ?)
-                # """
-                # source_2_params = (sid_clean, sid_wildcard, sid_clean)
+# ⚠️ ĐÃ XOÁ 19/08/2026 — /get-notifs/{student_id}
+#
+# Bản cũ của endpoint này bị chú thích lại thay vì xoá. Git đã giữ toàn bộ lịch
+# sử nên không cần để lại trong tệp, và để lại thì có hại thật:
+#
+# Khi vá lỗ hổng quyền gửi thông báo, lệnh thay chuỗi tìm
+# '@router.post("...")' đã khớp trúng dòng ĐÃ CHÚ THÍCH '# @router.post("...")'
+# và sửa nhầm vào đó — tạo ra một decorator thật nằm giữa khối chú thích, bám
+# vào hàm phía dưới. Kết quả là hai tuyến đường cùng đường dẫn, FastAPI dùng
+# cái đăng ký trước (không có bảo vệ), và bản vá thành vô tác dụng trong khi
+# nhìn mã vẫn tưởng đã vá.
+#
+# Muốn xem bản cũ: git log -p -- vinhuni_notifications/router.py
 
-            # # --- KẾT HỢP CẢ 2 NGUỒN VÀ PHÂN NHÓM TABGROUP ---
-            # full_sql = f"""
-                # WITH CombinedNotifs AS (
-                    # -- NGUỒN 1: Từ hàng đợi Queue (Cá nhân, Điểm, Lịch thi, Lịch học)
-                    # SELECT 
-                        # CAST(q.ID AS INT) as NotifId, 
-                        # q.Title as TieuDe, 
-                        # q.Summary as TomTat, 
-                        # q.Body as NoiDung, 
-                        # q.CreatedAt as NgayPhatHanh, 
-                        # CAST(ISNULL(q.IsRead, 0) AS INT) as IsRead, 
-                        # ISNULL(q.Sender, N'Hệ thống') as NguoiDang,
-                        # UPPER(ISNULL(q.Category, 'PERSONAL')) as LoaiTin,
-                        # CASE 
-                            # -- Tab CÔNG VIỆC/HỌC TẬP (WORK)
-                            # WHEN q.Category IN ('VAN_BAN', 'LICH_TUAN', 'LICH_HOP', 'LICH_DAY', 'LICH_CONGTAC', 'LICH_HOC') THEN 'WORK'
-                            # -- Tab VINHUNI/VĂN BẢN (GENERAL)
-                            # WHEN q.Category IN ('GENERAL', 'TOPIC', 'THONG_BAO') THEN 'GENERAL'
-                            # -- Tab NHẮC LỊCH (REMINDER)
-                            # WHEN q.Category IN ('CANH_BAO', 'LICH_THI') THEN 'REMINDER'
-                            # -- Tab CÁ NHÂN (PERSONAL)
-                            # ELSE 'PERSONAL'
-                        # END as TabGroup
-                    # FROM tbl_Notification_Queue q
-                    # WHERE (REPLACE(REPLACE(UPPER(RTRIM(q.StudentId)), 'SV', ''), 'CB', '') = ? 
-                           # OR CAST(q.IdNguoiHocs AS NVARCHAR(MAX)) LIKE ?)
-                      # AND q.IsSent = 1
-                      # AND q.ID NOT IN (SELECT h.NotifID FROM tbl_Notification_Hides h WHERE h.StudentId = ?)
-
-                    # UNION ALL
-
-                    # -- NGUỒN 2: Dữ liệu Tab 1 (Library cho Cán bộ / ThongBao cho Sinh viên)
-                    # {sql_source_2}
-                # )
-                # SELECT * FROM CombinedNotifs
-                # ORDER BY NgayPhatHanh DESC
-                # OFFSET ? ROWS FETCH NEXT ? ROWS ONLY;
-            # """
-            
-            # # Thứ tự tham số truyền vào: (Nguồn 1: sid, wildcard, sid) + (Nguồn 2 params) + (offset, page_size)
-            # params = (sid_clean, sid_wildcard, sid_clean) + source_2_params + (offset, page_size)
-
-            # cursor.execute(full_sql, params)
-            # rows = cursor.fetchall()
-            
-            # # 3. Trả về mảng JSON sạch cho Mobile
-            # return [{
-                # "ID": int(r[0]),
-                # "TieuDe": r[1] or "",
-                # "TomTat": r[2] or "",
-                # "NoiDung": r[3] or "",
-                # "NgayPhatHanh": r[4].strftime('%H:%M %d/%m/%Y') if r[4] else "",
-                # "IsRead": bool(r[5]),
-                # "NguoiDang": r[6] or "VinhUni",
-                # "LoaiTin": r[7],
-                # "TabGroup": r[8]
-            # } for r in rows]
-
-    # except Exception as e:
-        # print(f"🔥 Lỗi Get Notifs: {str(e)}")
-        # return []
-# @router.get("/get-notifs/{student_id}")
-# async def api_get_notifs(student_id: str, page: int = 1):
-    # page_size = 20 
-    # offset = (page - 1) * page_size
-    
-    # # 1. Làm sạch ID và xác định vai trò (is_staff)
-    # raw_id = str(student_id).strip().upper()
-    # # Logic nhận diện Cán bộ: Có chữ CB hoặc mã số <= 6 ký tự
-    # is_staff = "CB" in raw_id or len(raw_id.replace("SV", "").replace("CB", "")) <= 6 
-    
-    # sid_clean = raw_id.replace("SV", "").replace("CB", "")
-    # sid_wildcard = f"%{sid_clean}%"
-    
-    # # Quy ước mã nhóm (Sơn có thể mở rộng thêm mã Khoa/Khóa tại đây)
-    # # Ví dụ: Nếu SV thuộc khóa 62, mã sẽ là %K62%
-    
-    # try:
-        # with pyodbc.connect(REMOTE_CONN_STR, autocommit=True) as conn:
-            # cursor = conn.cursor()
-            
-            # # --- ĐIỀU KIỆN LỌC RIÊNG CHO CÁN BỘ ---
-            # # Nếu là cán bộ, loại bỏ các tin thuộc danh mục văn bản vì đã có nút riêng
-            # exclude_docs_condition = ""
-            # if is_staff:
-                # exclude_docs_condition = "AND q.Category NOT IN ('VAN_BAN', 'VAN_BAN_PHAP_QUY', 'CONG_VAN')"
-
-            # # --- TRUY VẤN TỔNG HỢP SIÊU LINH HOẠT ---
-            # full_sql = f"""
-                # WITH CombinedNotifs AS (
-                    # -- NGUỒN 1: Từ hàng đợi Queue (Tin cá nhân, nhắc lịch, học tập)
-                    # SELECT 
-                        # CAST(q.ID AS INT) as NotifId, 
-                        # q.Title as TieuDe, 
-                        # q.Summary as TomTat, 
-                        # q.Body as NoiDung, 
-                        # q.CreatedAt as NgayPhatHanh, 
-                        # CAST(ISNULL(q.IsRead, 0) AS INT) as IsRead, 
-                        # ISNULL(q.Sender, N'Hệ thống') as NguoiDang,
-                        # UPPER(ISNULL(q.Category, 'GENERAL')) as LoaiTin,
-                        # CASE 
-                            # -- Tab 2: WORK (Công tác / Học tập)
-                            # WHEN q.Category IN ('LICH_TUAN', 'DIEM','LICH_HOP', 'LICH_DAY', 'LICH_CONGTAC', 'LICH_HOC', 'LOP_HP', 'LOP_HC') THEN 'WORK'
-                            # -- Tab 3: REMINDER (Nhắc lịch / Cảnh báo)
-                            # WHEN q.Category IN ('CANH_BAO', 'LICH_THI','HUY_LOP_LT', 'NHAC_HEN') THEN 'REMINDER'
-                            # -- Tab 4: PERSONAL (Cá nhân / Phản hồi đơn)
-                            # WHEN q.Category IN ('PHAN_HOI', 'DUYET_DON', 'CA_NHAN') THEN 'PERSONAL'
-                            # -- Tab 1: GENERAL (Tin trường, Khoa, Khóa và CÁC LOẠI TIN MỚI CHƯA ĐỊNH NGHĨA)
-                            # ELSE 'GENERAL'
-                        # END as TabGroup
-                    # FROM tbl_Notification_Queue q
-                    # WHERE (
-                        # REPLACE(REPLACE(UPPER(RTRIM(q.StudentId)), 'SV', ''), 'CB', '') = ? -- Đích danh
-                        # OR CAST(q.IdNguoiHocs AS NVARCHAR(MAX)) LIKE ?                      -- Theo nhóm (Wildcard)
-                        # OR q.StudentId = 'ALL'                                             -- Toàn trường
-                    # )
-                    # AND q.IsSent = 1
-                    # {exclude_docs_condition}
-                    # AND q.ID NOT IN (SELECT h.NotifID FROM tbl_Notification_Hides h WHERE h.StudentId = ?)
-
-                    # UNION ALL
-
-                    # -- NGUỒN 2: Từ bảng thông báo chung (Website/Phòng ban)
-                    # -- Luôn ưu tiên đưa vào Tab 1 (GENERAL)
-                    # SELECT 
-                        # CAST(t.Id AS INT) as NotifId, 
-                        # t.TieuDe, 
-                        # LEFT(CAST(t.NoiDung AS NVARCHAR(MAX)), 150) as TomTat, 
-                        # t.NoiDung, 
-                        # CAST(t.NgayPhatHanh AS DATETIME) as NgayPhatHanh, 
-                        # CASE WHEN r.NotifID IS NOT NULL THEN 1 ELSE 0 END as IsRead, 
-                        # N'VinhUni' as NguoiDang,
-                        # 'THONG_BAO' as LoaiTin,
-                        # 'GENERAL' as TabGroup
-                    # FROM tbl_ThongBao t
-                    # LEFT JOIN tbl_Notification_Read_Status r ON t.Id = r.NotifID 
-                        # AND REPLACE(REPLACE(UPPER(RTRIM(r.StudentId)), 'SV', ''), 'CB', '') = ?
-                    # WHERE t.IsDeleted = 0 
-                    # AND (
-                        # CAST(t.IdNguoiHocs AS NVARCHAR(MAX)) LIKE ? 
-                        # OR t.IdLoaiThongBao = 2 -- 2 là quy ước cho tin công khai toàn trường
-                    # )
-                    # AND t.Id NOT IN (SELECT h.NotifID FROM tbl_Notification_Hides h WHERE h.StudentId = ?)
-                # )
-                # SELECT * FROM CombinedNotifs
-                # ORDER BY NgayPhatHanh DESC
-                # OFFSET ? ROWS FETCH NEXT ? ROWS ONLY;
-            # """
-            
-            # # Thứ tự tham số chuẩn: sid, wildcard, sid (nguồn 1) -> sid, wildcard, sid (nguồn 2) -> phân trang
-            # params = (sid_clean, sid_wildcard, sid_clean, sid_clean, sid_wildcard, sid_clean, offset, page_size)
-
-            # cursor.execute(full_sql, params)
-            # rows = cursor.fetchall()
-            
-            # # 3. Trả về mảng JSON sạch
-            # return [{
-                # "ID": int(r[0]),
-                # "TieuDe": r[1] or "",
-                # "TomTat": r[2] or "",
-                # "NoiDung": r[3] or "",
-                # "NgayPhatHanh": r[4].strftime('%H:%M %d/%m/%Y') if r[4] else "",
-                # "IsRead": bool(r[5]),
-                # "NguoiDang": r[6] or "VinhUni",
-                # "LoaiTin": r[7],
-                # "TabGroup": r[8]
-            # } for r in rows]
-
-    # except Exception as e:
-        # print(f"🔥 Lỗi API Get Notifs: {str(e)}")
-        # return []
-      
-# @router.get("/get-notifs/{student_id}")
-# async def api_get_notifs(student_id: str, page: int = 1):
-    # page_size = 20 
-    # offset = (page - 1) * page_size
-    
-    # # 1. Chuẩn hóa ID và nhận diện vai trò
-    # raw_id = str(student_id).strip().upper()
-    # is_staff = "CB" in raw_id or len(raw_id.replace("SV", "").replace("CB", "")) <= 6 
-    
-    # sid_clean = raw_id.replace("SV", "").replace("CB", "")
-    # sid_wildcard = f"%{sid_clean}%"
-    
-    # try:
-        # with pyodbc.connect(REMOTE_CONN_STR, autocommit=True) as conn:
-            # cursor = conn.cursor()
-            
-            # # --- 🛡️ BỘ LỌC "THÉP" ---
-            # # Bước 1: Loại bỏ tuyệt đối tin Chat cho TẤT CẢ mọi người (Tránh NULL bằng ISNULL)
-            # extra_filter = "AND ISNULL(q.Category, '') <> 'CHAT_GROUP' AND ISNULL(q.Scope, '') <> 'CHAT_PUSH_ONLY'"
-            
-            # # Bước 2: Lọc riêng cho Cán bộ (Né tin văn bản và tin chung của Sinh viên)
-            # if is_staff:
-                # extra_filter += " AND q.Category NOT IN ('VAN_BAN', 'VAN_BAN_PHAP_QUY', 'CONG_VAN', 'GENERAL', 'THONG_BAO', 'THONG_BAO_CHUNG')"
-
-            # # --- 🚀 SQL ĐỘNG: CHỈ LẤY TIN CHUNG NẾU LÀ SINH VIÊN ---
-            # source_2_sql = ""
-            # source_2_params = []
-            
-            # if not is_staff:
-                # source_2_sql = """
-                    # UNION ALL
-                    # SELECT 
-                        # CAST(t.Id AS INT) as NotifId, t.TieuDe, 
-                        # LEFT(CAST(t.NoiDung AS NVARCHAR(MAX)), 150) as TomTat, t.NoiDung, 
-                        # CAST(t.NgayPhatHanh AS DATETIME) as NgayPhatHanh, 
-                        # CASE WHEN r.NotifID IS NOT NULL THEN 1 ELSE 0 END as IsRead, 
-                        # N'VinhUni' as NguoiDang, 'THONG_BAO' as LoaiTin, 'GENERAL' as TabGroup
-                    # FROM tbl_ThongBao t
-                    # LEFT JOIN tbl_Notification_Read_Status r ON t.Id = r.NotifID 
-                        # AND REPLACE(REPLACE(UPPER(RTRIM(r.StudentId)), 'SV', ''), 'CB', '') = ?
-                    # WHERE t.IsDeleted = 0 
-                    # AND (CAST(t.IdNguoiHocs AS NVARCHAR(MAX)) LIKE ? OR t.IdLoaiThongBao = 2)
-                    # AND t.Id NOT IN (SELECT h.NotifID FROM tbl_Notification_Hides h WHERE h.StudentId = ?)
-                # """
-                # source_2_params = [sid_clean, sid_wildcard, sid_clean]
-
-            # full_sql = f"""
-                # WITH CombinedNotifs AS (
-                    # -- NGUỒN 1: Từ hàng đợi Queue
-                    # SELECT 
-                        # CAST(q.ID AS INT) as NotifId, q.Title as TieuDe, q.Summary as TomTat, 
-                        # q.Body as NoiDung, q.CreatedAt as NgayPhatHanh, 
-                        # CAST(ISNULL(q.IsRead, 0) AS INT) as IsRead, 
-                        # ISNULL(q.Sender, N'Hệ thống') as NguoiDang,
-                        # UPPER(ISNULL(q.Category, 'GENERAL')) as LoaiTin,
-                        # CASE 
-                            # WHEN q.Category IN ('CANH_BAO', 'LICH_THI', 'LICH_HOP', 'NHAC_HEN', 'HUY_LICH', 'HUY_LOP_LT', 'KHAN_CAP') THEN 'REMINDER'
-                            # WHEN q.Category IN ('LICH_TUAN', 'DIEM', 'LICH_DAY', 'LICH_CONGTAC', 'LICH_HOC', 'LOP_HP', 'LOP_HC') THEN 'WORK'
-                            # WHEN q.Category IN ('PHAN_HOI', 'DUYET_DON', 'CA_NHAN') THEN 'PERSONAL'
-                            # ELSE 'GENERAL'
-                        # END as TabGroup
-                    # FROM tbl_Notification_Queue q
-                    # WHERE (
-                        # REPLACE(REPLACE(UPPER(RTRIM(q.StudentId)), 'SV', ''), 'CB', '') = ? 
-                        # OR CAST(q.IdNguoiHocs AS NVARCHAR(MAX)) LIKE ? 
-                        # OR q.StudentId = 'ALL'
-                    # )
-                    # AND q.IsSent = 1
-                    # {extra_filter}
-                    # AND q.ID NOT IN (SELECT h.NotifID FROM tbl_Notification_Hides h WHERE h.StudentId = ?)
-
-                    # {source_2_sql}
-                # )
-                # SELECT * FROM CombinedNotifs
-                # ORDER BY NgayPhatHanh DESC
-                # OFFSET ? ROWS FETCH NEXT ? ROWS ONLY;
-            # """
-            
-            # final_params = [sid_clean, sid_wildcard, sid_clean] + source_2_params + [offset, page_size]
-            # cursor.execute(full_sql, final_params)
-            # rows = cursor.fetchall()
-            
-            # return [{
-                # "ID": int(r[0]),
-                # "TieuDe": r[1] or "",
-                # "TomTat": r[2] or "",
-                # "NoiDung": r[3] or "",
-                # "NgayPhatHanh": r[4].strftime('%H:%M %d/%m/%Y') if r[4] else "",
-                # "IsRead": bool(r[5]),
-                # "NguoiDang": r[6] or "VinhUni",
-                # "LoaiTin": r[7],
-                # "TabGroup": r[8]
-            # } for r in rows]
-
-    # except Exception as e:
-        # print(f"🔥 Lỗi API Get Notifs: {str(e)}")
-        # return []
 @router.get("/count-unread/{student_id}")
 def count_unread(student_id: str,
                        me: Optional[Identity] = Depends(danh_tinh_neu_co)):
@@ -1228,82 +912,20 @@ def get_notif_detail(notif_id: int, type: str = None):
             return JSONResponse(status_code=404, content={"message": "Không tìm thấy nội dung"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"message": str(e)})
-# @router.get("/get-notif-detail/{notif_id}")
-# async def get_notif_detail(notif_id: int, type: str = None):
-    # """
-    # Hàm lấy chi tiết nội dung thông báo.
-    # Tự động rẽ nhánh tìm vào Thư viện văn bản (Cán bộ) hoặc Thông báo (Sinh viên)
-    # """
-    # try:
-        # with pyodbc.connect(REMOTE_CONN_STR, autocommit=True) as conn:
-            # cursor = conn.cursor()
-            # row = None
-            
-            # # --- BƯỚC 1: TÌM KIẾM THEO LOẠI TIN (ƯU TIÊN) ---
-            
-            # # 1. Nếu là Văn bản pháp quy của Cán bộ (Lấy từ Thư viện)
-            # if type == 'VAN_BAN_PHAP_QUY':
-                # sql = """
-                    # SELECT DocId, N'📄 ' + ISNULL(LoaiVanBan, N'Văn bản') + ': ' + SoKyHieu, 
-                           # TrichYeu, CreatedAt, N'Hệ thống Điều hành', 
-                           # FileName -- 🔥 Lấy tên file từ đĩa cứng
-                    # FROM tbl_Document_Library WHERE DocId = ?
-                # """
-                # cursor.execute(sql, (notif_id,))
-                # r = cursor.fetchone()
-                # if r:
-                    # return {
-                        # "ID": r[0], "TieuDe": r[1], "NoiDung": r[2], 
-                        # "NgayPhatHanh": r[3].strftime('%H:%M %d/%m/%Y'), 
-                        # "NguoiDang": r[4], "FileName": r[5] # Trả về cho App
-                    # }
+# ⚠️ ĐÃ XOÁ 19/08/2026 — /get-notif-detail/{notif_id}
+#
+# Bản cũ của endpoint này bị chú thích lại thay vì xoá. Git đã giữ toàn bộ lịch
+# sử nên không cần để lại trong tệp, và để lại thì có hại thật:
+#
+# Khi vá lỗ hổng quyền gửi thông báo, lệnh thay chuỗi tìm
+# '@router.post("...")' đã khớp trúng dòng ĐÃ CHÚ THÍCH '# @router.post("...")'
+# và sửa nhầm vào đó — tạo ra một decorator thật nằm giữa khối chú thích, bám
+# vào hàm phía dưới. Kết quả là hai tuyến đường cùng đường dẫn, FastAPI dùng
+# cái đăng ký trước (không có bảo vệ), và bản vá thành vô tác dụng trong khi
+# nhìn mã vẫn tưởng đã vá.
+#
+# Muốn xem bản cũ: git log -p -- vinhuni_notifications/router.py
 
-            # # 2. Nếu là Thông báo chung (Dành cho Sinh viên)
-            # elif type == 'GENERAL':
-                # sql_tb = """
-                    # SELECT t.Id, t.TieuDe, t.NoiDung, CAST(t.NgayPhatHanh AS DATETIME), ISNULL(u.FullName, N'Phòng ban')
-                    # FROM tbl_ThongBao t
-                    # LEFT JOIN tbl_Users u ON CAST(t.CreatedBy AS NVARCHAR(100)) = u.UserCode
-                    # WHERE t.Id = ?
-                # """
-                # cursor.execute(sql_tb, (notif_id,))
-                # row = cursor.fetchone()
-                # if row:
-                    # return {
-                        # "ID": row[0], "TieuDe": row[1], "NoiDung": row[2], 
-                        # "NgayPhatHanh": row[3].strftime('%H:%M - %d/%m/%Y') if row[3] else "",
-                        # "NguoiDang": row[4], "LoaiTin": "GENERAL"
-                    # }
-
-            # # --- BƯỚC 2: NẾU KHÔNG RA (HOẶC CÁC LOẠI KHÁC), QUÉT HÀNG ĐỢI QUEUE ---
-            # # Tìm tin cá nhân, điểm, lịch học, lịch thi...
-            # sql_q = "SELECT ID, Title, Body, CreatedAt, ISNULL(Sender, N'Hệ thống'), Category FROM tbl_Notification_Queue WHERE ID = ?"
-            # cursor.execute(sql_q, (notif_id,))
-            # row = cursor.fetchone()
-            
-            # if row:
-                # return {
-                    # "ID": row[0], "TieuDe": row[1], "NoiDung": row[2], 
-                    # "NgayPhatHanh": row[3].strftime('%H:%M - %d/%m/%Y') if row[3] else "",
-                    # "NguoiDang": row[4], "LoaiTin": row[5]
-                # }
-
-            # # --- BƯỚC 3: PHÒNG THỦ CUỐI CÙNG (THỬ HẾT CÁC BẢNG NẾU VẪN CHƯA THẤY) ---
-            # # Thử lại bảng Library lần cuối
-            # cursor.execute("SELECT DocId, TrichYeu FROM tbl_Document_Library WHERE DocId = ?", (notif_id,))
-            # alt_row = cursor.fetchone()
-            # if alt_row:
-                # return {"ID": alt_row[0], "TieuDe": "Văn bản nội bộ", "NoiDung": alt_row[1], "NguoiDang": "Hệ thống"}
-
-            # return JSONResponse(status_code=404, content={"message": f"Không tìm thấy nội dung tin ID {notif_id}"})
-
-    # except Exception as e:
-        # print(f"🔥 Lỗi Get Detail ID {notif_id}: {str(e)}")
-        # return JSONResponse(status_code=500, content={"message": "Lỗi máy chủ khi tải chi tiết"})
-
-# Khởi tạo mô hình AI (Nên để toàn cục để tránh load lại mỗi lần gọi API)
-# Mô hình này hỗ trợ tiếng Việt rất tốt cho tìm kiếm ngữ nghĩa
-#model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 model_path = './models/notification_model'
 
 if os.path.exists(model_path):
@@ -1440,40 +1062,20 @@ def search_documents(
 
 
 
-# Vì router đã có prefix="/api" rồi
-# @router.post("/hide-notif/{notif_id}") 
-# async def api_hide_notif(notif_id: int, request: Request):
-    # try:
-        # data = await request.json()
-        # student_id = data.get("student_id")
+# ⚠️ ĐÃ XOÁ 19/08/2026 — /hide-notif/{notif_id}
+#
+# Bản cũ của endpoint này bị chú thích lại thay vì xoá. Git đã giữ toàn bộ lịch
+# sử nên không cần để lại trong tệp, và để lại thì có hại thật:
+#
+# Khi vá lỗ hổng quyền gửi thông báo, lệnh thay chuỗi tìm
+# '@router.post("...")' đã khớp trúng dòng ĐÃ CHÚ THÍCH '# @router.post("...")'
+# và sửa nhầm vào đó — tạo ra một decorator thật nằm giữa khối chú thích, bám
+# vào hàm phía dưới. Kết quả là hai tuyến đường cùng đường dẫn, FastAPI dùng
+# cái đăng ký trước (không có bảo vệ), và bản vá thành vô tác dụng trong khi
+# nhìn mã vẫn tưởng đã vá.
+#
+# Muốn xem bản cũ: git log -p -- vinhuni_notifications/router.py
 
-        # if not student_id:
-            # return JSONResponse(status_code=400, content={"message": "Thiếu student_id"})
-
-        # # Làm sạch mã SV: loại bỏ 'SV' và khoảng trắng
-        # sid_clean = str(student_id).strip().upper().replace("SV", "")
-
-        # with pyodbc.connect(REMOTE_CONN_STR, autocommit=True) as conn:
-            # cursor = conn.cursor()
-            
-            # # Ghi vào bảng tbl_Notification_Hides bạn vừa tạo
-            # sql_hide = """
-                # IF NOT EXISTS (SELECT 1 FROM tbl_Notification_Hides WHERE NotifID = ? AND StudentId = ?)
-                # BEGIN
-                    # INSERT INTO tbl_Notification_Hides (NotifID, StudentId, HiddenAt)
-                    # VALUES (?, ?, GETDATE())
-                # END
-            # """
-            # cursor.execute(sql_hide, (notif_id, sid_clean, notif_id, sid_clean))
-            
-            # # Đánh dấu IsSent=0 hoặc xóa trong Queue để chắc chắn không quét lại tin này cho cá nhân
-            # cursor.execute("UPDATE tbl_Notification_Queue SET IsSent = 0 WHERE ID = ? AND StudentId = ?", (notif_id, sid_clean))
-
-        # return {"status": "SUCCESS", "message": f"Đã ẩn tin {notif_id} cho SV {sid_clean}"}
-
-    # except Exception as e:
-        # print(f"🔥 Lỗi khi ẩn tin: {str(e)}")
-        # return JSONResponse(status_code=500, content={"message": str(e)})
 @router.post("/hide-notif/{notif_id}") 
 def api_hide_notif(notif_id: int, data: dict,
                    me: Optional[Identity] = Depends(danh_tinh_neu_co)):
@@ -1651,111 +1253,20 @@ def mark_all_read(student_id: str,
         print(f"🔥 Lỗi Mark-All-Read: {e}")
         return JSONResponse(status_code=500,
                             content={"status": "ERROR", "message": str(e)})
-# @router.post("/mark-read/{notif_id}")
-# async def api_mark_read(notif_id: int, request: Request):
-    # try:
-        # # 1. Lấy dữ liệu từ Body JSON gửi lên
-        # data = await request.json()
-        # student_id = data.get("student_id")
+# ⚠️ ĐÃ XOÁ 19/08/2026 — /mark-read/{notif_id}
+#
+# Bản cũ của endpoint này bị chú thích lại thay vì xoá. Git đã giữ toàn bộ lịch
+# sử nên không cần để lại trong tệp, và để lại thì có hại thật:
+#
+# Khi vá lỗ hổng quyền gửi thông báo, lệnh thay chuỗi tìm
+# '@router.post("...")' đã khớp trúng dòng ĐÃ CHÚ THÍCH '# @router.post("...")'
+# và sửa nhầm vào đó — tạo ra một decorator thật nằm giữa khối chú thích, bám
+# vào hàm phía dưới. Kết quả là hai tuyến đường cùng đường dẫn, FastAPI dùng
+# cái đăng ký trước (không có bảo vệ), và bản vá thành vô tác dụng trong khi
+# nhìn mã vẫn tưởng đã vá.
+#
+# Muốn xem bản cũ: git log -p -- vinhuni_notifications/router.py
 
-        # if not student_id:
-            # return JSONResponse(status_code=400, content={"status": "ERROR", "message": "Thiếu student_id"})
-
-        # # 2. Làm sạch mã số (SV2101 -> 2101)
-        # sid_clean = str(student_id).strip().upper().replace("SV", "").replace("CB", "")
-        
-        # print(f"--- 🔔 ĐÁNH DẤU ĐÃ ĐỌC ID: {notif_id} | SV: {sid_clean} ---")
-
-        # with pyodbc.connect(REMOTE_CONN_STR, autocommit=True) as conn:
-            # cursor = conn.cursor()
-            
-            # # KIỂM TRA: Tin nhắn này có nằm trong hàng đợi (Queue) không?
-            # cursor.execute("SELECT StudentId, IdNguoiHocs FROM tbl_Notification_Queue WHERE ID = ?", (notif_id,))
-            # queue_item = cursor.fetchone()
-
-            # if queue_item:
-                # # =========================================================
-                # # TRƯỜNG HỢP A: TIN TRONG QUEUE (Cá nhân hoặc Nhóm)
-                # # =========================================================
-                
-                # # 1. Cập nhật vào bảng LOG CHI TIẾT (Cuốn sổ biên nhận)
-                # sql_log = """
-                    # UPDATE tbl_Notification_Log_Detail 
-                    # SET IsRead = 1, ReadAt = GETDATE() 
-                    # WHERE QueueId = ? 
-                      # AND REPLACE(REPLACE(StudentId, 'SV', ''), 'CB', '') = ?
-                # """
-                # cursor.execute(sql_log, (notif_id, sid_clean))
-                
-                # # 2. Cập nhật vào bảng Queue chính nếu là tin đích danh 1 người
-                # sql_main = """
-                    # UPDATE tbl_Notification_Queue 
-                    # SET IsRead = 1, ReadAt = GETDATE() 
-                    # WHERE ID = ? 
-                      # AND (REPLACE(REPLACE(StudentId, 'SV', ''), 'CB', '') = ? OR StudentId IS NULL)
-                # """
-                # cursor.execute(sql_main, (notif_id, sid_clean))
-                # print(f"✅ Đã cập nhật trạng thái đọc trong Queue & Log cho ID: {notif_id}")
-
-            # else:
-                # # =========================================================
-                # # TRƯỜNG HỢP B: TIN CHUNG (Đồng bộ từ tbl_ThongBao)
-                # # =========================================================
-                # sql_status = """
-                    # IF NOT EXISTS (SELECT 1 FROM tbl_Notification_Read_Status WHERE NotifID = ? AND StudentId = ?) 
-                    # BEGIN
-                        # INSERT INTO tbl_Notification_Read_Status (NotifID, StudentId, ReadAt) 
-                        # VALUES (?, ?, GETDATE())
-                    # END
-                # """
-                # cursor.execute(sql_status, (notif_id, sid_clean, notif_id, sid_clean))
-                # print(f"✅ Đã ghi nhận đọc tin CHUNG cho ID: {notif_id}")
-
-            # return {"status": "SUCCESS", "message": "Đã đánh dấu đã đọc"}
-            
-    # except Exception as e:
-        # print(f"🔥 Lỗi Mark-Read: {str(e)}")
-        # return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
-    # =========================================================
-# API LẤY DANH SÁCH SINH VIÊN ĐÃ ĐỌC (BÁO CÁO CHO GIẢNG VIÊN)
-# =========================================================
-# @router.get("/lecturer/notification-report/{queue_id}")
-# async def get_notification_report(queue_id: int):
-    # try:
-        # # Sử dụng REMOTE_CONN_STR mà Sơn đã định nghĩa ở trên
-        # with pyodbc.connect(REMOTE_CONN_STR) as conn:
-            # cursor = conn.cursor()
-            
-            # # Query lấy thông tin từ bảng Log phụ JOIN với StudentProfiles
-            # sql = """
-                # SELECT 
-                    # ld.StudentId, 
-                    # ISNULL(sp.FullName, N'Sinh viên mới') as HoTen, 
-                    # ld.IsRead, 
-                    # FORMAT(ld.ReadAt, 'HH:mm dd/MM/yyyy') as TimeRead
-                # FROM tbl_Notification_Log_Detail ld
-                # LEFT JOIN tbl_Users sp ON ld.StudentId = REPLACE(REPLACE(sp.UserCode, 'SV', ''), 'CB', '')
-                # WHERE ld.QueueId = ?
-                # ORDER BY ld.IsRead DESC, sp.FullName ASC
-            # """
-            # cursor.execute(sql, (queue_id,))
-            # rows = cursor.fetchall()
-            
-            # # Chuyển đổi dữ liệu sang dạng JSON
-            # report_data = []
-            # for r in rows:
-                # report_data.append({
-                    # "sid": r[0],
-                    # "name": r[1],
-                    # "is_read": bool(r[2]),
-                    # "time": r[3] if r[3] else "---"
-                # })
-            
-            # return {"status": "success", "data": report_data}
-            
-    # except Exception as e:
-        # print(f"🔥 Lỗi API notification-report: {e}")
-        # return {"status": "error", "message": str(e)}  
 @router.get("/lecturer/notification-report/{queue_id}")
 def get_notification_report(queue_id: int):
     try:
@@ -1795,37 +1306,20 @@ def get_notification_report(queue_id: int):
     except Exception as e:
         print(f"🔥 Lỗi API notification-report: {e}")
         return {"status": "error", "message": str(e)}      
-# =========================================================
-# API LẤY LỊCH SỬ ĐÃ GỬI (Dòng 619 trở đi)
-# =========================================================
-# @router.get("/lecturer/sent-history/{sender_id}")
-# async def get_sent_history(sender_id: str):
-    # try:
-        # with pyodbc.connect(REMOTE_CONN_STR) as conn:
-            # cursor = conn.cursor()
-            # sql = """
-                # SELECT 
-                    # n.ID, n.Title, n.Scope, n.StudentId,
-                    # FORMAT(n.CreatedAt, 'HH:mm dd/MM/yyyy') as TimeCreated,
-                    # (SELECT COUNT(*) FROM tbl_Notification_Log_Detail WHERE QueueId = n.ID) as TotalTarget,
-                    # (SELECT COUNT(*) FROM tbl_Notification_Log_Detail WHERE QueueId = n.ID AND IsRead = 1) as ReadCount
-                # FROM tbl_Notification_Queue n
-                # WHERE n.SenderId = ? OR n.SenderId = REPLACE(?, 'CB', '')
-                # ORDER BY n.CreatedAt DESC
-            # """
-            # cursor.execute(sql, (sender_id, sender_id))
-            # rows = cursor.fetchall()
-            
-            # history = [{
-                # "id": r[0], "title": r[1], "scope": r[2], 
-                # "target_sid": r[3],
-                # "time": r[4], "total": r[5], "read": r[6]
-            # } for r in rows]
-            
-            # return {"status": "success", "data": history}
-    # except Exception as e:
-        # print(f"🔥 Lỗi sent-history: {e}")
-        # return {"status": "error", "message": str(e)}
+# ⚠️ ĐÃ XOÁ 19/08/2026 — /lecturer/sent-history/{sender_id}
+#
+# Bản cũ của endpoint này bị chú thích lại thay vì xoá. Git đã giữ toàn bộ lịch
+# sử nên không cần để lại trong tệp, và để lại thì có hại thật:
+#
+# Khi vá lỗ hổng quyền gửi thông báo, lệnh thay chuỗi tìm
+# '@router.post("...")' đã khớp trúng dòng ĐÃ CHÚ THÍCH '# @router.post("...")'
+# và sửa nhầm vào đó — tạo ra một decorator thật nằm giữa khối chú thích, bám
+# vào hàm phía dưới. Kết quả là hai tuyến đường cùng đường dẫn, FastAPI dùng
+# cái đăng ký trước (không có bảo vệ), và bản vá thành vô tác dụng trong khi
+# nhìn mã vẫn tưởng đã vá.
+#
+# Muốn xem bản cũ: git log -p -- vinhuni_notifications/router.py
+
 @router.get("/lecturer/sent-history/{sender_id}")
 def get_sent_history(sender_id: str):
     try:
@@ -2049,73 +1543,20 @@ def get_student_classes(student_id: str, me: Identity = Depends(get_current_user
         print(f"❌ Lỗi lấy danh sách lớp: {e}")
         return []
 
-# 2. API cho Sinh viên: Gửi đơn xin phép (Tự động tìm Giảng viên)
-# @router.post("/student/send-attendance-request")
-# async def send_attendance_request(data: dict):
-    # try:
-        # # 1. Lấy dữ liệu từ App gửi lên
-        # raw_sid = data.get("student_id", "")
-        # # Làm sạch mã SV: SV2057... -> 2057...
-        # sid = str(raw_sid).strip().upper().replace("SV", "").replace("CB", "")
-        
-        # lhp_code = data.get("lhp_code") # Mã lớp HP (Ví dụ: INF20106...)
-        # category = data.get("category") # VANG_HOC, MUON_HOC...
-        # reason = data.get("reason")
-        
-        # # In ra màn hình console để debug
-        # print(f"--- 🔔 YÊU CẦU XIN PHÉP MỚI ---")
-        # print(f"👉 Sinh viên: {sid} (Gốc: {raw_sid})")
-        # print(f"👉 Mã lớp HP: {lhp_code}")
+# ⚠️ ĐÃ XOÁ 19/08/2026 — /student/send-attendance-request
+#
+# Bản cũ của endpoint này bị chú thích lại thay vì xoá. Git đã giữ toàn bộ lịch
+# sử nên không cần để lại trong tệp, và để lại thì có hại thật:
+#
+# Khi vá lỗ hổng quyền gửi thông báo, lệnh thay chuỗi tìm
+# '@router.post("...")' đã khớp trúng dòng ĐÃ CHÚ THÍCH '# @router.post("...")'
+# và sửa nhầm vào đó — tạo ra một decorator thật nằm giữa khối chú thích, bám
+# vào hàm phía dưới. Kết quả là hai tuyến đường cùng đường dẫn, FastAPI dùng
+# cái đăng ký trước (không có bảo vệ), và bản vá thành vô tác dụng trong khi
+# nhìn mã vẫn tưởng đã vá.
+#
+# Muốn xem bản cũ: git log -p -- vinhuni_notifications/router.py
 
-        # # Kiểm tra nếu mã lớp bị NULL/None (Lỗi mà Sơn vừa gặp)
-        # if not lhp_code or str(lhp_code).lower() == "none":
-            # print("❌ LỖI: Mã lớp gửi lên bị None. Hãy kiểm tra lại API get-schedule!")
-            # return JSONResponse(
-                # status_code=400, 
-                # content={"status": "error", "message": "Mã lớp học phần không hợp lệ (None)"}
-            # )
-
-        # with pyodbc.connect(REMOTE_CONN_STR) as conn:
-            # cursor = conn.cursor()
-            
-            # # 2. Tìm Mã Giảng viên dạy lớp này (Dựa trên câu SQL Sơn đã test)
-            # # Ta join bảng LHP với bảng Lịch học để lấy MaCanBo
-            # sql_find_gv = """
-                # SELECT TOP 1 lh.MaCanBo 
-                # FROM tbl_Tkb_LopHocPhan lhp
-                # INNER JOIN tbl_Tkb_LopHocPhan_LichHoc lh ON lhp.Id = lh.IdLopHocPhan
-                # WHERE lhp.Code = ? AND lhp.IsDeleted = 0
-            # """
-            # cursor.execute(sql_find_gv, (lhp_code,))
-            # row = cursor.fetchone()
-            
-            # # Nếu tìm thấy thì bỏ chữ 'CB', nếu không thấy gán mặc định 'AD' (Admin)
-            # gv_id = "AD"
-            # if row and row[0]:
-                # gv_id = str(row[0]).strip().upper().replace("CB", "")
-            
-            # print(f"👉 Đã xác định Giảng viên nhận tin: {gv_id}")
-
-            # # 3. Thực hiện chèn vào bảng tbl_Attendance_Requests
-            # sql_ins = """
-                # INSERT INTO tbl_Attendance_Requests 
-                # (StudentId, LhpId, Category, Reason, Status, CreatedAt, LecturerId)
-                # VALUES (?, ?, ?, ?, 0, GETDATE(), ?)
-            # """
-            # cursor.execute(sql_ins, (sid, lhp_code, category, reason, gv_id))
-            
-            # # 🔥 QUAN TRỌNG NHẤT: Phải có dòng commit này dữ liệu mới thực sự được lưu
-            # conn.commit() 
-            
-            # print(f"✅ THÀNH CÔNG: Đã chèn yêu cầu cho SV {sid} vào Database.")
-            # return {"status": "success", "message": "Gửi đơn xin phép thành công!"}
-
-    # except Exception as e:
-        # print(f"❌ LỖI THỰC THI: {str(e)}")
-        # return JSONResponse(
-            # status_code=500, 
-            # content={"status": "error", "message": f"Lỗi hệ thống: {str(e)}"}
-        # )
 @router.post("/student/send-attendance-request")
 def send_attendance_request(data: dict, me: Identity = Depends(get_current_user)):
     """Gửi đơn xin phép nghỉ học.

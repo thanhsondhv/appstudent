@@ -124,6 +124,12 @@ jobs:
           MAU='sk-proj-[A-Za-z0-9]|sk-[A-Za-z0-9]{40,}|AIza[0-9A-Za-z_-]{35}'
           MAU="$MAU|-----BEGIN [A-Z ]*PRIVATE KEY-----"
           MAU="$MAU|PWD=[^;\"'\'' ]{6,}"
+          # Bổ sung 19/08/2026: bắt được token dịch vụ web viết cứng.
+          # Sáu token Moodle nằm trong LMS/test_lms.py suốt thời gian dài mà
+          # bộ quét cũ không thấy, vì nó chỉ tìm khoá OpenAI, khoá riêng tư và
+          # mật khẩu chuỗi kết nối. Mẫu dưới đây bắt mọi biến tên có TOKEN /
+          # KEY / SECRET được gán một chuỗi dài.
+          MAU="$MAU|(TOKEN|KEY|SECRET|APIKEY)[A-Z_]*[[:space:]]*=[[:space:]]*[\"'\''][A-Za-z0-9]{20,}"
           if grep -rEn "$MAU" --include='*.py' --include='*.dart' --include='*.json' \
                --include='*.yaml' --include='*.yml' . 2>/dev/null \
                | grep -v node_modules | grep -v '_luu_tru' | grep -v '\.example'; then
