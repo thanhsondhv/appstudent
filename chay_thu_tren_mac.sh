@@ -97,10 +97,30 @@ else
   echo "  Chạy lại kèm tài khoản:  ./chay_thu_tren_mac.sh <tài khoản> <mật khẩu>"
 fi
 
-flutter test integration_test/ -d "$UDID" "${DINH_NGHIA[@]}" 2>&1 \
-  | grep -aE "^[0-9]{2}:[0-9]{2}|…|✅|❌|Expected|Actual|reason" | tail -50
+# Chạy TỪNG TỆP một, không đưa cả thư mục cho flutter test.
+#
+# `flutter test integration_test/` gộp nhiều tệp vào một lượt và treo vô hạn
+# trên thiết bị thật — đã gặp: 11 phút không nhúc nhích, trong khi từng tệp
+# chạy riêng chỉ mất vài giây. Vòng lặp này vừa tránh được, vừa cho biết tệp
+# nào hỏng thay vì cả cụm.
+LOI_UD=0
+KQ=$(mktemp)
+for TEP in integration_test/*_test.dart; do
+  echo
+  printf "  \033[1m%s\033[0m\n" "$(basename "$TEP")"
+  # Ghi ra tệp rồi lọc, thay vì nối ống thẳng — nối ống thì mã thoát nhận được
+  # là của grep chứ không phải của flutter test, và bài hỏng sẽ bị coi là đạt.
+  flutter test "$TEP" -d "$UDID" "${DINH_NGHIA[@]}" > "$KQ" 2>&1 || LOI_UD=1
+  grep -aE "^[0-9]{2}:[0-9]{2} \+|…|✅|❌|⏭️|Expected|Actual|reason:|Bỏ qua|All tests passed" \
+       "$KQ" | sed 's/^/    /'
+done
+rm -f "$KQ"
 
 echo
-do_ "Xong"
+if [ "$LOI_UD" -ne 0 ]; then
+  do_ "Xong — CÓ BÀI KHÔNG ĐẠT"
+else
+  do_ "Xong — tất cả đều đạt"
+fi
 echo "  Nhật ký backend: $NHAT_KY"
 echo "  Backend vẫn đang chạy ở $MAY_CHU — dừng bằng: pkill -f chay_thu_cuc_bo"
