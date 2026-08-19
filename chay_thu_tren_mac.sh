@@ -83,8 +83,11 @@ done
 
 # ── 6. Kiểm thử backend ──────────────────────────────────────────────────
 do_ "6. Kiểm thử backend"
-( cd "$GOC_BE" && DB_SERVER="$DB" bash tests/chay_tat_ca.sh 2>&1 ) \
-  | grep -aE "TẤT CẢ|❌|⏭️" | sed 's/^/  /'
+LOI_BE=0
+KQ_BE=$(mktemp)
+( cd "$GOC_BE" && DB_SERVER="$DB" bash tests/chay_tat_ca.sh > "$KQ_BE" 2>&1 ) || LOI_BE=1
+grep -aE "TẤT CẢ|❌|⏭️" "$KQ_BE" | sed 's/^/  /'
+rm -f "$KQ_BE"
 
 # ── 7. Kiểm thử ứng dụng trên máy ảo ─────────────────────────────────────
 do_ "7. Kiểm thử ứng dụng"
@@ -117,10 +120,21 @@ done
 rm -f "$KQ"
 
 echo
-if [ "$LOI_UD" -ne 0 ]; then
-  do_ "Xong — CÓ BÀI KHÔNG ĐẠT"
+# Kết luận phải tính CẢ backend lẫn ứng dụng.
+#
+# Bản đầu chỉ nhìn kết quả phía ứng dụng, nên in "tất cả đều đạt" ngay bên dưới
+# một dòng "❌ CÓ KIỂM TRA KHÔNG ĐẠT" của backend. Một bản tóm tắt nói sai còn
+# tệ hơn không có bản tóm tắt nào — người đọc tin nó rồi bỏ qua phần chi tiết.
+if [ "$LOI_BE" -ne 0 ] || [ "$LOI_UD" -ne 0 ]; then
+  do_ "Xong — CÓ KIỂM TRA KHÔNG ĐẠT"
+  [ "$LOI_BE" -ne 0 ] && echo "  • backend: xem mục 6 bên trên"
+  [ "$LOI_UD" -ne 0 ] && echo "  • ứng dụng: xem mục 7 bên trên"
+  TRANG_THAI=1
 else
   do_ "Xong — tất cả đều đạt"
+  TRANG_THAI=0
 fi
 echo "  Nhật ký backend: $NHAT_KY"
 echo "  Backend vẫn đang chạy ở $MAY_CHU — dừng bằng: pkill -f chay_thu_cuc_bo"
+
+exit "$TRANG_THAI"
