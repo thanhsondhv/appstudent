@@ -39,7 +39,7 @@ from datetime import datetime, timedelta
 
 
 # Đảm bảo đã import hàm tạo token từ file jwt_handler.py bạn vừa tạo
-from auth.jwt_handler import create_access_token 
+from auth.jwt_handler import create_access_token , require_staff
 
 from routers.api_academic import router as academic_router
 from routers.api_certificate import router as certificate_router
@@ -448,7 +448,19 @@ def refresh_ms_token(data: dict):
     except Exception as e:
         print(f"🔥 [CRITICAL] Lỗi hệ thống tại API refresh_ms_token: {str(e)}")
         return {"status": "error", "message": str(e)}        
-@app.post("/api/chat/send-notification")
+# ⚠️ VÁ LỖ HỔNG 19/08/2026 — endpoint này TRƯỚC ĐÂY KHÔNG CÓ XÁC THỰC.
+#
+# Bất kỳ ai biết địa chỉ đều gửi được thông báo, kể cả thông báo TOÀN TRƯỜNG.
+# Kiểm chứng thực tế: gọi không kèm token trả về HTTP 200 và chạy trọn hàm.
+#
+# Đây là lỗ hổng GHI, nặng hơn nhiều so với lỗ hổng ĐỌC đã vá hôm qua: kẻ xấu
+# có thể gửi tin giả danh Nhà trường tới 15 nghìn sinh viên — lừa đảo, tin sai
+# về lịch thi, học phí.
+#
+# Bốn endpoint anh em trong cùng nhóm đã có `Depends(verify_staff_token)` từ
+# trước; bốn cái này bị bỏ sót.
+@app.post("/api/chat/send-notification",
+          dependencies=[Depends(require_staff)])
 async def proxy_to_producer(data: dict):
     """
     Cầu nối: Nhận yêu cầu từ Internet (8080) và đẩy vào Producer nội bộ (8081)

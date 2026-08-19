@@ -5,7 +5,7 @@ from database.db_config import DBConfig
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status 
 # Đảm bảo bạn đã import hàm verify_token của mình nữa nhé
-from auth.jwt_handler import verify_token
+from auth.jwt_handler import verify_token, require_staff
 from core.settings import settings  # cấu hình tập trung (Pha 0)
 
 # Khởi tạo Router (Các API trong này sẽ tự động có tiền tố /api)
@@ -665,7 +665,19 @@ DB_NAME = settings.db.name
 REMOTE_CONN_STR = settings.db.local_conn_str
 
 
-@router.post("/lecturer/send-notification")
+# ⚠️ VÁ LỖ HỔNG 19/08/2026 — endpoint này TRƯỚC ĐÂY KHÔNG CÓ XÁC THỰC.
+#
+# Bất kỳ ai biết địa chỉ đều gửi được thông báo, kể cả thông báo TOÀN TRƯỜNG.
+# Kiểm chứng thực tế: gọi không kèm token trả về HTTP 200 và chạy trọn hàm.
+#
+# Đây là lỗ hổng GHI, nặng hơn nhiều so với lỗ hổng ĐỌC đã vá hôm qua: kẻ xấu
+# có thể gửi tin giả danh Nhà trường tới 15 nghìn sinh viên — lừa đảo, tin sai
+# về lịch thi, học phí.
+#
+# Bốn endpoint anh em trong cùng nhóm đã có `Depends(verify_staff_token)` từ
+# trước; bốn cái này bị bỏ sót.
+@router.post("/lecturer/send-notification",
+             dependencies=[Depends(require_staff)])
 def send_notification(data: dict):
     # data: title, content, type, target_id, sender_id (Cần Flutter gửi thêm cái này)
     try:
@@ -1065,7 +1077,19 @@ def get_low_enrollment_theory(
         print(f"🔥 Lỗi API low-enrollment-theory: {e}")
         return {"status": "error", "message": str(e)}
 #gui cho sinh vien lớp học phần ít sv
-@router.post("/admin/send-notification-multi-lhp-theory")
+# ⚠️ VÁ LỖ HỔNG 19/08/2026 — endpoint này TRƯỚC ĐÂY KHÔNG CÓ XÁC THỰC.
+#
+# Bất kỳ ai biết địa chỉ đều gửi được thông báo, kể cả thông báo TOÀN TRƯỜNG.
+# Kiểm chứng thực tế: gọi không kèm token trả về HTTP 200 và chạy trọn hàm.
+#
+# Đây là lỗ hổng GHI, nặng hơn nhiều so với lỗ hổng ĐỌC đã vá hôm qua: kẻ xấu
+# có thể gửi tin giả danh Nhà trường tới 15 nghìn sinh viên — lừa đảo, tin sai
+# về lịch thi, học phí.
+#
+# Bốn endpoint anh em trong cùng nhóm đã có `Depends(verify_staff_token)` từ
+# trước; bốn cái này bị bỏ sót.
+@router.post("/admin/send-notification-multi-lhp-theory",
+             dependencies=[Depends(require_staff)])
 def send_notification_multi_lhp_theory(data: dict):
     try:
         title = data.get("title", "").strip()
@@ -1287,7 +1311,19 @@ def get_classes_by_cohort(id_khoa: str = Query(...), cohort: str = Query(...)):
 import uuid # Dùng để sinh mã ExternalId duy nhất
 from datetime import datetime
 
-@router.post("/admin/send-notification-dept-cohort")
+# ⚠️ VÁ LỖ HỔNG 19/08/2026 — endpoint này TRƯỚC ĐÂY KHÔNG CÓ XÁC THỰC.
+#
+# Bất kỳ ai biết địa chỉ đều gửi được thông báo, kể cả thông báo TOÀN TRƯỜNG.
+# Kiểm chứng thực tế: gọi không kèm token trả về HTTP 200 và chạy trọn hàm.
+#
+# Đây là lỗ hổng GHI, nặng hơn nhiều so với lỗ hổng ĐỌC đã vá hôm qua: kẻ xấu
+# có thể gửi tin giả danh Nhà trường tới 15 nghìn sinh viên — lừa đảo, tin sai
+# về lịch thi, học phí.
+#
+# Bốn endpoint anh em trong cùng nhóm đã có `Depends(verify_staff_token)` từ
+# trước; bốn cái này bị bỏ sót.
+@router.post("/admin/send-notification-dept-cohort",
+             dependencies=[Depends(require_staff)])
 def send_notification_dept_cohort(data: dict):
     print("\n🚀 [DEBUG] Bắt đầu gửi tin và ghi Log chi tiết")
     try:
@@ -1367,7 +1403,6 @@ def send_notification_dept_cohort(data: dict):
         print(f"❌ Lỗi: {str(e)}")
         return {"status": "error", "message": str(e)} 
 # # THONG BAO TOÀN TRƯỜNG CHO CÁN BỘ VÀ SINH VIÊN        
-# @router.post("/admin/send-notification-all")
 # async def send_notification_all(data: dict):
     # try:
         # title = data.get("title", "").strip()
@@ -1429,7 +1464,16 @@ def send_notification_dept_cohort(data: dict):
     # except Exception as e:
         # print(f"🔥 Lỗi gửi toàn trường: {e}")
         # return {"status": "error", "message": str(e)}        
-@router.post("/admin/send-notification-all")
+# ⚠️ VÁ LỖ HỔNG 19/08/2026 — endpoint này TRƯỚC ĐÂY KHÔNG CÓ XÁC THỰC.
+#
+# Bất kỳ ai biết địa chỉ đều gửi được thông báo cho TOÀN TRƯỜNG. Kiểm chứng
+# thực tế: gọi không kèm token trả về HTTP 200 và chạy trọn hàm.
+#
+# Đây là lỗ hổng GHI, nặng hơn nhiều so với lỗ hổng ĐỌC đã vá hôm qua: kẻ xấu
+# có thể gửi tin giả danh Nhà trường tới 15 nghìn sinh viên — lừa đảo, tin sai
+# về lịch thi, học phí.
+@router.post("/admin/send-notification-all",
+             dependencies=[Depends(require_staff)])
 def send_notification_all(data: dict):
     print(f"\n📢 [GLOBAL] Gửi tin toàn trường: {data.get('target_type')}")
     try:
