@@ -87,17 +87,34 @@ def chay() -> int:
 
     # ── 3. Nhanh hơn hẳn ─────────────────────────────────────────────────
     print("\n\033[1m3. Tốc độ tra cứu\033[0m")
-    t = time.time()
-    cur.execute("SELECT COUNT(*) FROM tbl_ThongBao WHERE IsDeleted=0 "
-                "AND CAST(IdNguoiHocs AS NVARCHAR(MAX)) LIKE ?", (f"%{ma_thu}%",)).fetchval()
-    giay_cu = time.time() - t
 
-    t = time.time()
-    cur.execute("SELECT COUNT(*) FROM tbl_ThongBao_NguoiNhan "
-                "WHERE Nguon='THONGBAO' AND MaNguoiNhan=?", (ma_thu,)).fetchval()
-    giay_moi = time.time() - t
+    # ⚠️ SỬA 19/08/2026: bản đầu đo truy vấn ĐẦU TIÊN trên kết nối, nên tính cả
+    # chi phí khởi động kết nối (~1 giây) vào tốc độ truy vấn. Kết quả là phép
+    # thử báo đỏ trong khi tra cứu thật nhanh hơn 130–290 lần.
+    #
+    # Một phép thử hay báo động giả còn tệ hơn không có: người ta quen với màu
+    # đỏ rồi bỏ qua cả lỗi thật.
+    #
+    # Nay chạy nóng trước, rồi lấy lần NHANH NHẤT trong ba lần — cách đo tiêu
+    # chuẩn khi so tốc độ, tránh nhiễu do máy chủ bận nhất thời.
+    cur.execute("SELECT 1").fetchval()
 
-    print(f"       quét chuỗi: {giay_cu:.2f}s | theo chỉ mục: {giay_moi:.3f}s")
+    def _do(cau, tham):
+        nhanh_nhat = None
+        for _ in range(3):
+            t = time.time()
+            cur.execute(cau, tham).fetchval()
+            giay = time.time() - t
+            nhanh_nhat = giay if nhanh_nhat is None else min(nhanh_nhat, giay)
+        return nhanh_nhat
+
+    giay_cu = _do("SELECT COUNT(*) FROM tbl_ThongBao WHERE IsDeleted=0 "
+                  "AND CAST(IdNguoiHocs AS NVARCHAR(MAX)) LIKE ?", (f"%{ma_thu}%",))
+    giay_moi = _do("SELECT COUNT(*) FROM tbl_ThongBao_NguoiNhan "
+                   "WHERE Nguon='THONGBAO' AND MaNguoiNhan=?", (ma_thu,))
+
+    print(f"       quét chuỗi: {giay_cu:.2f}s | theo chỉ mục: {giay_moi:.3f}s "
+          f"| nhanh hơn {giay_cu/max(giay_moi, 1e-6):.0f} lần")
     kt("tra cứu theo chỉ mục nhanh hơn ít nhất 5 lần", giay_moi * 5 < giay_cu, True)
 
     # ── 4. Trigger có chạy không ─────────────────────────────────────────

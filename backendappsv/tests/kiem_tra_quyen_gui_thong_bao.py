@@ -1,5 +1,6 @@
 """
-Mọi endpoint GỬI thông báo đều phải yêu cầu quyền cán bộ.
+Mọi endpoint GỬI thông báo, và mọi endpoint ĐỌC dữ liệu quản trị, đều phải
+yêu cầu quyền cán bộ.
 
 Phát hiện ngày 19/08/2026: NĂM endpoint gửi thông báo không có xác thực nào,
 trong đó có `/api/admin/send-notification-all` — gửi cho TOÀN TRƯỜNG.
@@ -102,6 +103,50 @@ def chay() -> int:
                     khong_bao_ve.append(
                         f"{tep.relative_to(GOC)}:{nut.lineno}  {dd}")
 
+    # ── Nhóm ĐỌC dữ liệu quản trị ─────────────────────────────────────
+    #
+    # Thêm 19/08/2026 sau khi phát hiện hai endpoint lộ dữ liệu cá nhân:
+    #
+    #   /api/lecturer/notification-report/{id} — không cần token, lấy được báo
+    #   cáo gồm 526 bản ghi với MÃ SINH VIÊN, HỌ TÊN ĐẦY ĐỦ, đã đọc hay chưa và
+    #   đọc lúc nào. Dò lần lượt mã tin là gom được danh sách sinh viên toàn
+    #   trường.
+    #
+    #   /api/lecturer/sent-history/{ma} — đọc được lịch sử gửi tin của bất kỳ
+    #   cán bộ nào, chỉ cần biết mã của họ.
+    MAU_QUAN_TRI = ("/lecturer/sent-history", "/lecturer/notification-report",
+                    "/admin/low-enrollment")
+    doc_quan_tri, doc_khong_bao_ve = [], []
+
+    for tep in GOC.rglob("*.py"):
+        if BO_QUA & set(tep.relative_to(GOC).parts):
+            continue
+        try:
+            cay = ast.parse(tep.read_text(encoding="utf-8"), filename=str(tep))
+        except (SyntaxError, OSError, UnicodeDecodeError):
+            continue
+        for nut in ast.walk(cay):
+            if not isinstance(nut, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for tt in nut.decorator_list:
+                if not (isinstance(tt, ast.Call) and isinstance(tt.func, ast.Attribute)
+                        and tt.func.attr in ("get", "post")
+                        and isinstance(tt.func.value, ast.Name)
+                        and tt.func.value.id in ("app", "router")):
+                    continue
+                if not tt.args or not isinstance(tt.args[0], ast.Constant):
+                    continue
+                dd = str(tt.args[0].value)
+                if not any(m in dd for m in MAU_QUAN_TRI):
+                    continue
+                doc_quan_tri.append(dd)
+                co = (_ten_phu_thuoc(tt) | _ten_phu_thuoc(ast.arguments(
+                    posonlyargs=[], args=nut.args.args, vararg=None,
+                    kwonlyargs=nut.args.kwonlyargs, kw_defaults=nut.args.kw_defaults,
+                    kwarg=None, defaults=nut.args.defaults))) & BAO_VE
+                if not co:
+                    doc_khong_bao_ve.append(f"{tep.relative_to(GOC)}:{nut.lineno}  {dd}")
+
     print("\n\033[1m1. Mọi endpoint gửi thông báo phải kiểm quyền\033[0m")
     print(f"       tìm thấy {len(duong_dan)} endpoint gửi thông báo")
     if khong_bao_ve:
@@ -120,6 +165,14 @@ def chay() -> int:
         print("       FastAPI dùng cái ĐĂNG KÝ TRƯỚC. Nếu cái đó không có bảo")
         print("       vệ thì bản vá vô tác dụng mà nhìn mã vẫn tưởng đã vá.")
     kt("mỗi đường dẫn chỉ khai đúng một lần", trung, [])
+
+    print("\n\033[1m3. Endpoint đọc dữ liệu quản trị phải kiểm quyền\033[0m")
+    print(f"       tìm thấy {len(doc_quan_tri)} endpoint")
+    if doc_khong_bao_ve:
+        print("       ❌ những cái sau KHÔNG kiểm quyền:")
+        for c in doc_khong_bao_ve:
+            print(f"          {c}")
+    kt("không endpoint đọc nào để trống bảo vệ", doc_khong_bao_ve, [])
 
     print()
     if HONG:

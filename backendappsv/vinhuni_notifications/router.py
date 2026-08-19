@@ -14,7 +14,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, Form, Query, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from auth.security_guard import verify_staff_token
-from auth.jwt_handler import get_current_user, Identity  # danh tính từ token (Pha 1)
+from auth.jwt_handler import get_current_user, Identity, require_staff  # danh tính từ token (Pha 1)
 import os
 from database.db_config import DBConfig
 from core.settings import settings  # cấu hình tập trung (Pha 0)
@@ -166,9 +166,22 @@ def _dieu_kien_nguoi_nhan_thongbao(cursor) -> str:
     Bảng đó do trigger giữ đồng bộ, xem sql/2026-08-19_dong_bo_nguoi_nhan.sql.
     """
     if _kiem_tra_bang_nguoi_nhan(cursor):
+        # ⚠️ CAST(? AS VARCHAR(32)) là BẮT BUỘC, không phải cho đẹp.
+        #
+        # Cột MaNguoiNhan kiểu VARCHAR, nhưng pyodbc gửi chuỗi Python lên dưới
+        # dạng NVARCHAR. SQL Server phải chuyển kiểu TỪNG DÒNG để so sánh, và
+        # khi đó chỉ mục mất tác dụng — tìm theo chỉ mục biến thành quét bảng.
+        #
+        # Đo trên 7,8 triệu dòng ngày 19/08/2026:
+        #     viết thẳng '1679'      →  16 ms
+        #     tham số ? (NVARCHAR)   → 687 ms   ← chậm gấp 42 lần
+        #     tham số + CAST         →  15 ms
+        #
+        # Kiểu lỗi này không bao giờ lộ ra khi đọc mã: câu truy vấn trông đúng,
+        # chỉ mục có thật, mà vẫn chậm.
         return ("EXISTS (SELECT 1 FROM tbl_ThongBao_NguoiNhan nn "
                 "WHERE nn.Nguon = 'THONGBAO' AND nn.ThongBaoId = t.Id "
-                "AND nn.MaNguoiNhan = ?)")
+                "AND nn.MaNguoiNhan = CAST(? AS VARCHAR(32)))")
     # Đường lui khi máy chủ chưa chạy kịch bản tạo bảng: vẫn phải ĐÚNG, nên
     # dùng dấu phân cách chứ không quay lại LIKE '%mã%'.
     return "(',' + CAST(t.IdNguoiHocs AS NVARCHAR(MAX)) + ',') LIKE ?"
@@ -1267,7 +1280,15 @@ def mark_all_read(student_id: str,
 #
 # Muốn xem bản cũ: git log -p -- vinhuni_notifications/router.py
 
-@router.get("/lecturer/notification-report/{queue_id}")
+# ⚠️ VÁ LỖ HỔNG 19/08/2026 — endpoint này TRƯỚC ĐÂY KHÔNG CÓ XÁC THỰC.
+#
+# Kiểm chứng thật: gọi không kèm token lấy được báo cáo của tin 31680 gồm 526
+# bản ghi, mỗi bản ghi có MÃ SINH VIÊN, HỌ TÊN ĐẦY ĐỦ, đã đọc hay chưa và đọc
+# lúc nào. Dò lần lượt mã tin là gom được danh sách sinh viên toàn trường.
+#
+# Nay chỉ cán bộ mới xem được báo cáo gửi tin.
+@router.get("/lecturer/notification-report/{queue_id}",
+            dependencies=[Depends(require_staff)])
 def get_notification_report(queue_id: int):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
@@ -1320,8 +1341,22 @@ def get_notification_report(queue_id: int):
 #
 # Muốn xem bản cũ: git log -p -- vinhuni_notifications/router.py
 
+# ⚠️ VÁ LỖ HỔNG 19/08/2026 — endpoint này TRƯỚC ĐÂY KHÔNG CÓ XÁC THỰC.
+#
+# Bất kỳ ai cũng đọc được lịch sử gửi tin của bất kỳ cán bộ nào, chỉ cần biết
+# mã của họ: đã gửi gì, cho ai, lúc nào, bao nhiêu người đã đọc.
+#
+# Nay ngoài việc bắt buộc là cán bộ, còn ép mã người gửi PHẢI LÀ CHÍNH MÌNH —
+# trừ quản trị viên. Cán bộ này không có lý do gì để xem lịch sử gửi tin của
+# cán bộ khác.
 @router.get("/lecturer/sent-history/{sender_id}")
-def get_sent_history(sender_id: str):
+def get_sent_history(sender_id: str, me: Identity = Depends(require_staff)):
+    if not me.is_admin:
+        cua_toi = str(me.user_code).strip().upper().replace("SV", "").replace("CB", "")
+        xin_xem = str(sender_id).strip().upper().replace("SV", "").replace("CB", "")
+        if cua_toi != xin_xem:
+            print(f"🚫 [LịchSửGửi] {me.user_code} xin xem lịch sử của {sender_id} — từ chối")
+            sender_id = me.user_code
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -1355,34 +1390,14 @@ def get_sent_history(sender_id: str):
     except Exception as e:
         print(f"🔥 Lỗi sent-history: {e}")
         return {"status": "error", "message": str(e)}
-# Đảm bảo hàm tiếp theo cũng phải thẳng hàng như vậy
-@router.get("/lecturer/notification-report/{queue_id}")
-def get_notification_report(queue_id: int):
-    try:
-        with pyodbc.connect(REMOTE_CONN_STR) as conn:
-            cursor = conn.cursor()
-            sql = """
-                SELECT 
-                    ld.StudentId, 
-                    ISNULL(u.FullName, N'Sinh viên') as HoTen, 
-                    ld.IsRead, 
-                    FORMAT(ld.ReadAt, 'HH:mm dd/MM/yyyy') as TimeRead
-                FROM tbl_Notification_Log_Detail ld
-                LEFT JOIN tbl_Users u ON ld.StudentId = REPLACE(REPLACE(u.UserCode, 'SV', ''), 'CB', '')
-                WHERE ld.QueueId = ?
-                ORDER BY ld.IsRead DESC, u.FullName ASC
-            """
-            cursor.execute(sql, (queue_id,))
-            rows = cursor.fetchall()
-            
-            report = [{
-                "sid": r[0], "name": r[1], 
-                "is_read": bool(r[2]), "time": r[3] or "---"
-            } for r in rows]
-            
-            return {"status": "success", "data": report}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}     
+# ⚠️ ĐÃ XOÁ 19/08/2026 — bản TRÙNG của /lecturer/notification-report.
+#
+# Endpoint này được khai HAI LẦN trong cùng tệp. FastAPI dùng cái đăng ký
+# TRƯỚC, nên bản thứ hai không bao giờ chạy — nhưng nó vẫn là quả mìn: chỉ cần
+# ai đó đảo thứ tự hoặc xoá bản đầu là bản KHÔNG CÓ BẢO VỆ này lên thay, và
+# lỗ hổng quay lại mà không ai biết.
+#
+# Bản đang dùng nằm phía trên, đã có Depends(require_staff).
 # 1. Check nhiều SV cùng lúc từ chuỗi dấu phẩy
 @router.get("/lecturer/check-multiple-users")
 def check_multiple_users(q: str):

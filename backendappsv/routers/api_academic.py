@@ -887,7 +887,13 @@ def attendance_scan(data: dict):
         # return {"status": "error", "message": str(e)}
 
 # # --- API 2: LẤY CHI TIẾT SINH VIÊN THUỘC CÁC LỚP SĨ SỐ ÍT ---
-@router.get("/admin/low-enrollment-students")
+# ⚠️ VÁ LỖ HỔNG 19/08/2026 — endpoint này TRƯỚC ĐÂY KHÔNG CÓ XÁC THỰC.
+#
+# Nó trả về danh sách sinh viên hoặc lớp học phần ít người đăng ký — dữ liệu
+# quản lý đào tạo, không phải thứ công khai. Phép thử tự động phát hiện, không
+# phải tôi đọc ra.
+@router.get("/admin/low-enrollment-students",
+            dependencies=[Depends(require_staff)])
 def get_low_enrollment_students(
     nam: str = Query(...),
     ky: str = Query(...),
@@ -1011,7 +1017,13 @@ def get_low_enrollment_students(
         # print(f"❌ Lỗi Multi-LHP: {str(e)}")
         # return {"status": "error", "message": f"Lỗi Server: {str(e)}"}
 # API Lấy danh sách lớp lý thuyết sĩ số thấp
-@router.get("/admin/low-enrollment-theory-classes")
+# ⚠️ VÁ LỖ HỔNG 19/08/2026 — endpoint này TRƯỚC ĐÂY KHÔNG CÓ XÁC THỰC.
+#
+# Nó trả về danh sách sinh viên hoặc lớp học phần ít người đăng ký — dữ liệu
+# quản lý đào tạo, không phải thứ công khai. Phép thử tự động phát hiện, không
+# phải tôi đọc ra.
+@router.get("/admin/low-enrollment-theory-classes",
+            dependencies=[Depends(require_staff)])
 def get_low_enrollment_theory(
     nam: str = Query(..., description="Ví dụ: 2025-2026"),
     ky: str = Query(..., description="Ví dụ: Học kỳ 2.1"),
