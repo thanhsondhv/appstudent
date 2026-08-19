@@ -55,9 +55,9 @@ def _dung_config() -> dict:
     cu["OpenAI"] = {
         **openai_cu,
         "ApiKey": khoa,
-        "ChatModel": settings.ai.chat_model or openai_cu.get("ChatModel", "gpt-4o-mini"),
-        "EmbeddingModel": (settings.ai.embedding_model
-                           or openai_cu.get("EmbeddingModel", "text-embedding-3-small")),
+        # Tên mô hình theo AI_PROVIDER — xem core/settings.py
+        "ChatModel": settings.ai.ten_mo_hinh_chat,
+        "EmbeddingModel": settings.ai.ten_mo_hinh_vector,
     }
     return cu
 

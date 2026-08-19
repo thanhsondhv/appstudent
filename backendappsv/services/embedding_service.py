@@ -19,9 +19,7 @@ Nay phân biệt ba tình huống, mỗi tình huống một câu nói rõ việ
 Bên gọi bắt LoiTroLyAI để trả lời người dùng cho tử tế, thay vì để 500 lọt ra.
 """
 
-from openai import OpenAI
-
-from config.settings import EMBEDDING_MODEL
+from core.openai_client import tao_client
 from core.settings import settings  # cấu hình tập trung (Pha 0)
 
 
@@ -41,19 +39,19 @@ class LoiTroLyAI(Exception):
 class EmbeddingService:
 
     def __init__(self):
-        khoa = (settings.ai.openai_api_key or "").strip()
-        self.client = OpenAI(api_key=khoa) if khoa else None
+        # tao_client() tự chọn OpenAI hay Gemini theo AI_PROVIDER trong .env
+        self.client = tao_client(ten_chuc_nang="tạo vector")
 
     def get_embedding(self, text: str):
         if self.client is None:
             raise LoiTroLyAI(
-                "Trợ lý AI chưa được cấu hình (thiếu OPENAI_API_KEY).",
+                "Trợ lý AI chưa được cấu hình (thiếu khoá API).",
                 can_nguoi_quan_tri=True,
             )
 
         try:
             phan_hoi = self.client.embeddings.create(
-                model=EMBEDDING_MODEL,
+                model=settings.ai.ten_mo_hinh_vector,
                 input=text,
             )
             return phan_hoi.data[0].embedding

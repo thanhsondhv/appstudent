@@ -174,9 +174,48 @@ class MicrosoftSettings:
 
 @dataclass(frozen=True)
 class AISettings:
+    # Nhà cung cấp mô hình: "openai" hoặc "gemini".
+    #
+    # Thêm 19/08/2026. Gemini có cổng TƯƠNG THÍCH OpenAI, nên đổi nhà cung cấp
+    # chỉ là đổi địa chỉ, khoá và tên mô hình — không phải viết lại mã gọi.
+    nha_cung_cap: str = field(
+        default_factory=lambda: _opt("AI_PROVIDER", "openai").lower())
+
     openai_api_key: str = field(default_factory=lambda: _opt("OPENAI_API_KEY"))
-    chat_model: str = field(default_factory=lambda: _opt("AI_CHAT_MODEL", "gpt-4o-mini"))
-    embedding_model: str = field(default_factory=lambda: _opt("AI_EMBEDDING_MODEL", "text-embedding-3-small"))
+    gemini_api_key: str = field(default_factory=lambda: _opt("GEMINI_API_KEY"))
+
+    chat_model: str = field(default_factory=lambda: _opt("AI_CHAT_MODEL"))
+    embedding_model: str = field(default_factory=lambda: _opt("AI_EMBEDDING_MODEL"))
+
+    # Cổng tương thích OpenAI của Google. Để trống khi dùng OpenAI.
+    gemini_base_url: str = field(default_factory=lambda: _opt(
+        "GEMINI_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/"))
+
+    @property
+    def dung_gemini(self) -> bool:
+        return self.nha_cung_cap == "gemini"
+
+    @property
+    def khoa_dang_dung(self) -> str:
+        return self.gemini_api_key if self.dung_gemini else self.openai_api_key
+
+    @property
+    def dia_chi_goc(self):
+        """Địa chỉ máy chủ mô hình. `None` nghĩa là dùng mặc định của OpenAI."""
+        return self.gemini_base_url if self.dung_gemini else None
+
+    @property
+    def ten_mo_hinh_chat(self) -> str:
+        """Tên mô hình trò chuyện, có mặc định riêng cho từng nhà cung cấp."""
+        if self.chat_model:
+            return self.chat_model
+        return "gemini-2.0-flash" if self.dung_gemini else "gpt-4o-mini"
+
+    @property
+    def ten_mo_hinh_vector(self) -> str:
+        if self.embedding_model:
+            return self.embedding_model
+        return "text-embedding-004" if self.dung_gemini else "text-embedding-3-small"
 
     # Ngưỡng an toàn — xem core/ai_guard.py
     max_prompt_chars: int = field(default_factory=lambda: _int("AI_MAX_PROMPT_CHARS", 4000))

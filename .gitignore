@@ -113,3 +113,12 @@ backendappsv/functions/node_modules/
 backendappsv/functions/package-lock.json
 backendappsv/**/*.wasm
 backendappsv/**/*.js.symbols
+
+# --- Mô hình học máy tải về ---
+# backendappsv/models/notification_model/ là mô hình paraphrase-multilingual-
+# MiniLM-L12-v2 tải từ HuggingFace, nặng 449 MB. GitHub chặn cứng ở 100 MB mỗi
+# tệp nên đẩy lên sẽ bị từ chối, và kho mã phình từ vài MB lên 453 MB.
+#
+# Nó tái tạo được bằng một lệnh: python tv.py
+# Xem backendappsv/models/README.md
+backendappsv/models/notification_model/

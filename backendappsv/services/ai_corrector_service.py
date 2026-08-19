@@ -45,7 +45,7 @@ class AICorrectorService:
 
             # 2. Gọi Model GPT-4o-mini (Vision-capable) để tối ưu chi phí và tốc độ
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=settings.ai.ten_mo_hinh_chat,
                 messages=[
                     {
                         "role": "user",
@@ -79,7 +79,7 @@ class AICorrectorService:
     def _execute_gpt_call(self, system_prompt, content):
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=settings.ai.ten_mo_hinh_chat,
                 messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": content}],
                 response_format={"type": "json_object"},
                 temperature=0.3

@@ -63,7 +63,7 @@ def analyze_content_pro(doc_name, content):
     """
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=settings.ai.ten_mo_hinh_chat,  # theo AI_PROVIDER trong .env
             messages=[
                 {"role": "system", "content": "Bạn là chuyên gia phân loại dữ liệu hành chính đại học."},
                 {"role": "user", "content": prompt}

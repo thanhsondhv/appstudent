@@ -48,22 +48,25 @@ muc "7. Module nội bộ / thư viện bị thiếu"
 # biên dịch — và vỡ đúng lúc cài mới lên máy chủ.
 python3 tests/kiem_tra_module_thieu.py || LOI=1
 
-muc "8. Trợ lý AI báo đúng lý do khi hỏng"
+muc "8. Đổi nhà cung cấp mô hình AI (OpenAI ⇄ Gemini)"
+python3 tests/kiem_tra_doi_nha_cung_cap_ai.py || LOI=1
+
+muc "9. Trợ lý AI báo đúng lý do khi hỏng"
 python3 tests/test_tro_ly_ai_het_han_muc.py || LOI=1
 
-muc "9. Phân quyền các endpoint thông báo"
+muc "10. Phân quyền các endpoint thông báo"
 python3 tests/test_quyen_thong_bao.py || LOI=1
 
-muc "10. Hàng đợi thông báo (chia lô, đếm phần, lấy lại việc bỏ dở)"
+muc "11. Hàng đợi thông báo (chia lô, đếm phần, lấy lại việc bỏ dở)"
 python3 tests/test_hang_doi_thong_bao.py || LOI=1
 
-muc "11. Tích hợp với Redis thật (tự bỏ qua nếu không có Redis)"
+muc "12. Tích hợp với Redis thật (tự bỏ qua nếu không có Redis)"
 python3 tests/test_tich_hop_redis.py || LOI=1
 
-muc "12. Firebase (dry_run — không gửi gì; tự bỏ qua nếu thiếu khoá/CSDL)"
+muc "13. Firebase (dry_run — không gửi gì; tự bỏ qua nếu thiếu khoá/CSDL)"
 python3 tests/kiem_tra_firebase.py || LOI=1
 
-muc "13. Khoá bí mật lọt vào mã nguồn"
+muc "14. Khoá bí mật lọt vào mã nguồn"
 if grep -rEn "sk-proj-[A-Za-z0-9]|ITCdhv@|AI2025\\\\SQLEXPRESS|= *'sa'" \
      --include="*.py" . 2>/dev/null | grep -v __pycache__ | grep -v _luu_tru | grep -v tests/; then
   echo "   ❌ phát hiện khoá viết cứng"; LOI=1

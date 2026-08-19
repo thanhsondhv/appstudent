@@ -9,10 +9,24 @@ load_dotenv()
 # Gán trực tiếp chuỗi API Key vào biến (Dùng để chạy test ở máy Local)
 OPENAI_API_KEY = core_settings.ai.openai_api_key
 
-# Cấu hình các Model của OpenAI
-EMBEDDING_MODEL = "text-embedding-3-small"
-CHAT_MODEL_FAST = "gpt-4o-mini"
-CHAT_MODEL_SMART = "gpt-4o"
+# Tên mô hình — lấy từ cấu hình tập trung, KHÔNG viết cứng.
+#
+# ⚠️ SỬA 19/08/2026: ba dòng này trước đây viết cứng tên mô hình của OpenAI,
+# nên đổi sang nhà cung cấp khác phải sửa từng chỗ gọi. Nay lấy từ
+# core.settings, và nó tự chọn theo AI_PROVIDER trong .env:
+#
+#   openai → gpt-4o-mini / text-embedding-3-small
+#   gemini → gemini-2.0-flash / text-embedding-004
+#
+# Đặt AI_CHAT_MODEL hoặc AI_EMBEDDING_MODEL trong .env để ghi đè.
+EMBEDDING_MODEL = core_settings.ai.ten_mo_hinh_vector
+CHAT_MODEL_FAST = core_settings.ai.ten_mo_hinh_chat
+# Mô hình "thông minh hơn" cho việc khó. Gemini không có cặp nhanh/mạnh tương
+# đương nên dùng chung một mô hình.
+CHAT_MODEL_SMART = (
+    core_settings.ai.chat_model
+    or ("gemini-2.0-flash" if core_settings.ai.dung_gemini else "gpt-4o")
+)
 
 # Ngưỡng độ chính xác khi tìm kiếm bằng Semantic Cache (Vector)
 SIMILARITY_THRESHOLD = 0.85
