@@ -253,7 +253,11 @@ class _OneDriveManagerScreenState extends State<OneDriveManagerScreen> {
         icon: Icons.add, backgroundColor: const Color(0xFF0078D4),
         children: [
           SpeedDialChild(child: const Icon(Icons.camera_alt), label: 'Chụp ảnh tải lên', onTap: _pickAndUploadImage),
-          SpeedDialChild(child: const Icon(Icons.create_new_folder), label: 'Thư mục mới', onTap: () {}),
+          // ⚠️ 19/08/2026: bỏ nút 'Thư mục mới'. Nó có nhãn và biểu tượng đầy
+          // đủ nhưng `onTap` rỗng — bấm vào không có gì xảy ra, và người dùng
+          // không biết là do hỏng hay do mình bấm trượt. Chưa có phần tạo thư
+          // mục ở dịch vụ OneDrive nên tạm ẩn; bày ra một nút chết còn tệ hơn
+          // là không bày.
         ],
       ),
     );

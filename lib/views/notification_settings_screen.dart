@@ -77,23 +77,57 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
     }
   }
 
+  /// Bật/tắt một loại thông báo, hoặc đổi giờ nhắc trước.
+  ///
+  /// ⚠️ SỬA 19/08/2026: bản cũ đổi giao diện rồi gọi máy chủ mà KHÔNG hề xem
+  /// kết quả. Máy chủ từ chối — mất mạng, hết phiên, lỗi máy chủ — thì công tắc
+  /// vẫn hiện là đã bật, người dùng yên tâm bỏ đi. Mở lại ứng dụng thì nó về
+  /// như cũ, và không ai hiểu vì sao.
+  ///
+  /// Nay vẫn đổi giao diện trước cho nhanh, nhưng máy chủ từ chối thì TRẢ LẠI
+  /// trạng thái cũ và nói rõ. Thà thấy nó bật lại còn hơn tưởng đã lưu.
   Future<void> _update(String cid, bool val, int time) async {
-    // Cập nhật giao diện ngay lập tức (Local update)
+    final truocDo = _settingsMap[cid];
+
+    // Đổi giao diện ngay để người dùng không phải chờ mạng
     setState(() => _settingsMap[cid] = {"enabled": val, "time": time});
-    
+
     try {
-      await Api.post(
+      final res = await Api.post(
         "/api/notifications/update",
         duLieu: {
-          "user_id": widget.userId, 
-          "category": cid, 
-          "is_enabled": val, 
+          "user_id": widget.userId,
+          "category": cid,
+          "is_enabled": val,
           "lead_time": time
         },
       );
+      if (res.thanhCong) return;
+
+      debugPrint("❌ Máy chủ từ chối lưu cài đặt: ${res.statusCode}");
+      _traLaiTrangThaiCu(cid, truocDo, res.thongDiepLoi);
     } catch (e) {
-      debugPrint("❌ Update failed: $e");
+      debugPrint("❌ Không lưu được cài đặt: $e");
+      _traLaiTrangThaiCu(cid, truocDo, "Không kết nối được máy chủ.");
     }
+  }
+
+  void _traLaiTrangThaiCu(String cid, dynamic truocDo, String liDo) {
+    if (!mounted) return;
+    setState(() {
+      if (truocDo == null) {
+        _settingsMap.remove(cid);
+      } else {
+        _settingsMap[cid] = truocDo;
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text("Chưa lưu được cài đặt. ${liDo.isEmpty ? "Vui lòng thử lại." : liDo}"),
+        backgroundColor: const Color(0xFFB3261E),
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   void _pickTime(String cid) {
