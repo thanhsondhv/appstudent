@@ -281,12 +281,34 @@ async def do_tra_cuu(request: dict):
     return data
 #====================================================
 @app.get("/api/check-version")
-async def check_version():
-    # Mỗi lần gọi API, Server sẽ đọc file này lên
-    # Sơn chỉ cần sửa file JSON là App sẽ nhận số mới ngay lập tức
-    with open("version_config.json", "r", encoding="utf-8") as f:
-        config = json.load(f)
-    return config
+def check_version():
+    """Số phiên bản mới nhất cho từng nền tảng.
+
+    Đọc tệp mỗi lần gọi, nên sửa version_config.json là ứng dụng nhận ngay,
+    không phải khởi động lại máy chủ.
+
+    ⚠️ SỬA 19/08/2026, hai điểm:
+      • Đổi `async def` → `def`. Đọc tệp là thao tác ĐỒNG BỘ; đặt trong
+        `async def` là nó chạy trên vòng lặp sự kiện. Đây là endpoint MỌI lần
+        mở ứng dụng đều gọi, nên cũng là chỗ dễ nghẽn nhất.
+      • Tệp hỏng hoặc mất thì trước đây ném ngoại lệ thành 500, và ứng dụng
+        hiểu là "không kiểm tra được" rồi im lặng. Nay trả lời rõ ràng.
+    """
+    duong_dan = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "version_config.json")
+    try:
+        with open(duong_dan, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"⚠️ [PhiênBản] Không thấy {duong_dan}")
+    except json.JSONDecodeError as exc:
+        print(f"⚠️ [PhiênBản] version_config.json sai định dạng: {exc}")
+
+    return JSONResponse(
+        status_code=503,
+        content={"status": "error",
+                 "message": "Chưa đọc được thông tin phiên bản trên máy chủ."},
+    )
 # =======================================================
 # 3. API ĐĂNG NHẬP FULL NAME
 # =======================================================    

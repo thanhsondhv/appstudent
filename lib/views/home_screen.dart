@@ -1,5 +1,6 @@
 //homehome_screen.dart
 import 'package:flutter/material.dart';
+import '../core/utils/so_sanh_phien_ban.dart';
 import '../core/api/may_chu.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -180,16 +181,12 @@ class _HomeScreenState extends State<HomeScreen> {
       debugPrint("🔥 Lỗi lấy menu: $e");
     }
   }
-  bool _isNewerVersion(String current, String latest) {
-    try {
-      List<String> curParts = current.split('+');
-      List<String> latParts = latest.split('+');
-      if (curParts[0] != latParts[0]) return true;
-      int curBuild = int.parse(curParts.length > 1 ? curParts[1] : "0");
-      int latBuild = int.parse(latParts.length > 1 ? latParts[1] : "0");
-      return latBuild > curBuild;
-    } catch (e) { return false; }
-  }
+  /// Máy chủ có bản mới hơn bản đang cài không.
+  ///
+  /// Phần so sánh nằm ở lib/core/utils/so_sanh_phien_ban.dart để kiểm thử
+  /// được — xem phần giải thích lỗi cũ ở đó.
+  bool _isNewerVersion(String current, String latest) =>
+      coBanMoiHon(current, latest);
 
   Future<void> _checkVersion() async {
     try {

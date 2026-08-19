@@ -3,7 +3,7 @@ description: "Hệ thống quản và hỗ trợ đào tạo cho cán bộ và n
 publish_to: 'none'
 
 # TĂNG LÊN +3 VÌ BẠN ĐÃ CÓ BẢN +2 TRƯỚC ĐÓ
-version: 1.3.5+21
+version: 1.4.0+22
 
 environment:
   sdk: '>=3.10.7 <4.0.0'
