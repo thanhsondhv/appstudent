@@ -1099,7 +1099,83 @@ def count_unread(student_id: str,
             cursor.execute(sql, (sid_clean, ts_queue, sid_clean, sid_clean, sid_clean,
                                  ts_thongbao, sid_clean, sid_clean))
             count = cursor.fetchone()[0]
-            return {"status": "success", "unread_count": count}
+
+            # Số chưa đọc TÁCH THEO TỪNG TAB.
+            #
+            # ⚠️ THÊM 19/08/2026. Ứng dụng có bốn tab, và trước đây huy hiệu trên
+            # mỗi tab được đếm từ danh sách ĐÃ TẢI VỀ — mà mỗi lần chỉ tải 20 tin.
+            # Hệ quả nhìn thấy trên máy thật: huy hiệu thanh dưới hiện 390 (số
+            # thật) trong khi bốn tab cộng lại chỉ 17. Hai con số cạnh nhau, đá
+            # nhau, người dùng không biết tin cái nào.
+            #
+            # Nay máy chủ trả luôn số của từng tab, dùng ĐÚNG cách phân nhóm mà
+            # get-notifs dùng — hai chỗ trả lời cùng một câu hỏi thì phải hỏi
+            # giống nhau, nếu không sẽ lại lệch.
+            sql_tab = f"""
+                SELECT TabGroup, COUNT(*) FROM (
+                    SELECT CASE
+                        WHEN q.Category IN ('CANH_BAO','LICH_THI','THI','LICH_HOP',
+                                            'NHAC_HEN','HUY_LICH','HUY_LOP_LT','KHAN_CAP') THEN 'REMINDER'
+                        WHEN q.Category IN ('LICH_TUAN','DIEM','LICH_DAY','LICH_CONGTAC',
+                                            'LICH_HOC','LOP_HP','LOP_HC') THEN 'WORK'
+                        WHEN q.Category IN ('PHAN_HOI','DUYET_DON','CA_NHAN') THEN 'PERSONAL'
+                        ELSE 'GENERAL' END AS TabGroup
+                    FROM tbl_Notification_Queue q
+                    WHERE (
+                        REPLACE(REPLACE(q.StudentId, 'SV', ''), 'CB', '') = ?
+                        OR {dk_queue}
+                        OR q.StudentId = 'ALL'
+                    )
+                    AND q.IsSent = 1
+                    AND ISNULL(q.Category, '') <> 'CHAT_GROUP'
+                    AND ISNULL(q.Scope, '') <> 'CHAT_PUSH_ONLY'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM tbl_Notification_Log_Detail d
+                        WHERE d.QueueId = q.ID
+                          AND REPLACE(REPLACE(d.StudentId, 'SV', ''), 'CB', '') = ?
+                          AND d.IsRead = 1
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM tbl_Notification_Read_Status s
+                        WHERE s.NotifID = q.ID
+                          AND REPLACE(REPLACE(s.StudentId, 'SV', ''), 'CB', '') = ?
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM tbl_Notification_Hides h
+                        WHERE h.NotifID = q.ID AND h.StudentId = ?
+                    )
+
+                    UNION ALL
+
+                    -- Tin từ tbl_ThongBao luôn thuộc tab tin chung
+                    SELECT 'GENERAL'
+                    FROM tbl_ThongBao t
+                    WHERE t.IsDeleted = 0
+                    AND ({dk_thongbao} OR t.IdLoaiThongBao = 2)
+                    AND NOT EXISTS (
+                        SELECT 1 FROM tbl_Notification_Read_Status s
+                        WHERE s.NotifID = t.Id
+                          AND REPLACE(REPLACE(s.StudentId, 'SV', ''), 'CB', '') = ?
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM tbl_Notification_Hides h
+                        WHERE h.NotifID = t.Id AND h.StudentId = ?
+                    )
+                ) x
+                GROUP BY TabGroup
+            """
+            theo_tab = {"GENERAL": 0, "WORK": 0, "REMINDER": 0, "PERSONAL": 0}
+            try:
+                cursor.execute(sql_tab, (sid_clean, ts_queue, sid_clean, sid_clean, sid_clean,
+                                         ts_thongbao, sid_clean, sid_clean))
+                for r in cursor.fetchall():
+                    theo_tab[str(r[0])] = int(r[1])
+            except Exception as exc:  # noqa: BLE001
+                # Thiếu phần tách theo tab thì huy hiệu tab kém chính xác, nhưng
+                # con số tổng vẫn đúng — không đáng làm hỏng cả lời gọi.
+                print(f"⚠️ [ThôngBáo] Không tách được số chưa đọc theo tab: {str(exc)[:120]}")
+
+            return {"status": "success", "unread_count": count, "theo_tab": theo_tab}
     except Exception as e:
         print(f"🔥 Error Count Unread: {e}")
         return {"status": "error", "unread_count": 0}

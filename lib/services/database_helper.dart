@@ -123,6 +123,37 @@ class DatabaseHelper {
     return await db.query('notifications', where: 'is_deleted_local = 0 AND UserCode = ?', whereArgs: [cleanId], orderBy: 'id DESC', limit: 50);
   }
 
+  /// Bỏ khỏi máy những thông báo đã biến mất phía máy chủ.
+  ///
+  /// [maConLai] là mã của các tin mà máy chủ vừa trả về ở TRANG ĐẦU — tức
+  /// những tin mới nhất. [maNhoNhat] là mã nhỏ nhất trong số đó.
+  ///
+  /// Chỉ xoá những tin có mã LỚN HƠN [maNhoNhat] mà không nằm trong danh sách:
+  /// chúng mới hơn tin cũ nhất của trang đầu, lẽ ra phải xuất hiện trong trang
+  /// đầu, nhưng lại không — nghĩa là máy chủ đã xoá hoặc ẩn chúng. Tin có mã
+  /// nhỏ hơn thì nằm ở các trang sau, chưa có căn cứ để kết luận, phải giữ lại.
+  ///
+  /// ⚠️ THÊM 19/08/2026: trước đó bộ nhớ đệm chỉ THÊM, không bao giờ BỎ. Tin đã
+  /// xoá trên máy chủ vẫn nằm lại dưới máy mãi mãi. Thấy tận mắt khi kiểm thử:
+  /// bốn tin thử đã xoá khỏi cơ sở dữ liệu vẫn hiện nguyên trong ứng dụng.
+  Future<int> donTinDaBienMat(
+    String userCode,
+    Set<int> maConLai,
+    int maNhoNhat,
+  ) async {
+    if (maConLai.isEmpty) return 0;
+
+    final db = await database;
+    final cleanId = userCode.toUpperCase().replaceFirst(RegExp(r'^(SV|CB)'), '');
+    final giuLai = maConLai.join(',');
+
+    return await db.delete(
+      'notifications',
+      where: 'UserCode = ? AND id > ? AND id NOT IN ($giuLai)',
+      whereArgs: [cleanId, maNhoNhat],
+    );
+  }
+
 Future<void> insertNotification(Map<String, dynamic> n, String userCode) async {
     final db = await database;
     final cleanId = userCode.toUpperCase().replaceFirst(RegExp(r'^(SV|CB)'), '');

@@ -71,9 +71,28 @@ class NotificationRepository {
       final duLieu = res.data is String ? jsonDecode(res.body) : res.data;
       final danhSach = (duLieu is Map ? duLieu['data'] : duLieu) as List? ?? [];
 
+      final maTuMayChu = <int>{};
       for (final tin in danhSach) {
-        await _db.insertNotification(Map<String, dynamic>.from(tin as Map), maNguoiDung);
+        final banGhi = Map<String, dynamic>.from(tin as Map);
+        await _db.insertNotification(banGhi, maNguoiDung);
+        final ma = banGhi['ID'] ?? banGhi['id'];
+        final soMa = ma is int ? ma : int.tryParse('$ma');
+        if (soMa != null) maTuMayChu.add(soMa);
       }
+
+      // Bỏ khỏi máy những tin máy chủ không còn trả về nữa.
+      //
+      // Bộ nhớ đệm trước đây chỉ THÊM, không bao giờ BỎ — tin đã xoá trên máy
+      // chủ vẫn nằm lại dưới máy mãi mãi. Thấy tận mắt khi kiểm thử: bốn tin
+      // thử đã xoá khỏi cơ sở dữ liệu vẫn hiện nguyên trong ứng dụng.
+      if (maTuMayChu.isNotEmpty) {
+        final maNhoNhat = maTuMayChu.reduce((a, b) => a < b ? a : b);
+        final daDon = await _db.donTinDaBienMat(maNguoiDung, maTuMayChu, maNhoNhat);
+        if (daDon > 0) {
+          debugPrint('🧹 [ThôngBáo] Đã bỏ $daDon tin không còn trên máy chủ');
+        }
+      }
+
       return await _db.getOfflineNotifs(maNguoiDung);
     } catch (e) {
       debugPrint('❌ [ThôngBáo] Dữ liệu máy chủ sai định dạng: $e');
@@ -232,6 +251,34 @@ class NotificationRepository {
   /// có ngay cả khi mất mạng. Máy chủ là nguồn đúng khi đồng bộ, còn để hiển
   /// thị thì dữ liệu tại máy đủ và nhanh hơn.
   Future<int> soChuaDoc() async => _db.getUnreadCount(await Session.userCode);
+
+  /// Số chưa đọc TÁCH THEO TỪNG TAB, lấy từ máy chủ.
+  ///
+  /// Khoá là tên nhóm mà máy chủ dùng: `GENERAL`, `WORK`, `REMINDER`,
+  /// `PERSONAL`. Trả về map rỗng khi không hỏi được — bên gọi tự lùi về cách
+  /// đếm tại máy.
+  ///
+  /// ⚠️ THÊM 19/08/2026. Trước đó huy hiệu trên mỗi tab đếm từ danh sách ĐÃ TẢI
+  /// VỀ, mà mỗi lần chỉ tải 20 tin. Nhìn thấy trên máy thật: huy hiệu thanh
+  /// dưới hiện 390 (số thật) trong khi bốn tab cộng lại chỉ 17. Hai con số nằm
+  /// cạnh nhau và đá nhau.
+  Future<Map<String, int>> soChuaDocTheoTab() async {
+    final maNguoiDung = await Session.userCode;
+    if (maNguoiDung.isEmpty) return const {};
+
+    final res = await Api.get('/api/count-unread/$maNguoiDung');
+    if (!res.thanhCong || res.data is! Map) return const {};
+
+    final theoTab = (res.data as Map)['theo_tab'];
+    if (theoTab is! Map) return const {};
+
+    final ketQua = <String, int>{};
+    theoTab.forEach((khoa, giaTri) {
+      final so = giaTri is int ? giaTri : int.tryParse('$giaTri');
+      if (so != null) ketQua[khoa.toString().toUpperCase()] = so;
+    });
+    return ketQua;
+  }
 
   /// Số chưa đọc dùng cho huy hiệu ở thanh điều hướng.
   ///

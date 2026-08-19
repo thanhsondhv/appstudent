@@ -275,10 +275,35 @@ class NotificationService {
         final duLieu = res.data;
         final List<dynamic> serverData =
             duLieu is List ? duLieu : (duLieu is Map ? (duLieu['data'] as List? ?? []) : []);
+
+        final maTuMayChu = <int>{};
         for (var n in serverData) {
           // Lưu vào SQLite
           await DatabaseHelper.instance.insertNotification(n, userId);
+          final ma = (n is Map) ? (n['ID'] ?? n['id']) : null;
+          final soMa = ma is int ? ma : int.tryParse('$ma');
+          if (soMa != null) maTuMayChu.add(soMa);
         }
+
+        // Bỏ khỏi máy những tin máy chủ không còn trả về nữa.
+        //
+        // ⚠️ THÊM 19/08/2026: bộ nhớ đệm trước đây chỉ THÊM, không bao giờ BỎ.
+        // Tin đã xoá trên máy chủ nằm lại dưới máy mãi mãi, và danh sách lệch
+        // dần theo thời gian. Thấy tận mắt khi kiểm thử: bốn tin thử đã xoá
+        // khỏi cơ sở dữ liệu vẫn hiện nguyên trong ứng dụng.
+        //
+        // Chỉ dọn những tin MỚI HƠN tin cũ nhất của trang đầu — chúng lẽ ra
+        // phải có mặt ở trang đầu mà lại không. Tin cũ hơn nằm ở các trang sau,
+        // chưa có căn cứ để kết luận nên phải giữ.
+        if (maTuMayChu.isNotEmpty) {
+          final maNhoNhat = maTuMayChu.reduce((a, b) => a < b ? a : b);
+          final daDon = await DatabaseHelper.instance
+              .donTinDaBienMat(userId, maTuMayChu, maNhoNhat);
+          if (daDon > 0) {
+            debugPrint("🧹 [ThôngBáo] Đã bỏ $daDon tin không còn trên máy chủ");
+          }
+        }
+
         // Trả về dữ liệu mới nhất sau khi đồng bộ
         List<dynamic> updatedLocal = await DatabaseHelper.instance.getOfflineNotifs(userId);
         

@@ -166,7 +166,12 @@ class _ThongBaoScreenState extends State<ThongBaoScreen> with SingleTickerProvid
       return;
     }
 
-    int dich = cacTab.indexWhere((ds) => _countUnreadInList(ds) > 0);
+    // Ưu tiên tab CÓ TIN CHƯA ĐỌC, theo số của máy chủ (số này tính trên toàn
+    // bộ dữ liệu, không chỉ 20 tin đã tải về).
+    int dich = -1;
+    for (var i = 0; i < cacTab.length; i++) {
+      if (_soChuaDocCuaTab(i, cacTab[i]) > 0) { dich = i; break; }
+    }
     if (dich < 0) dich = cacTab.indexWhere((ds) => ds.isNotEmpty);
     if (dich < 0) return;   // không tab nào có tin — để yên, hiện trạng thái rỗng
 
@@ -216,6 +221,17 @@ class _ThongBaoScreenState extends State<ThongBaoScreen> with SingleTickerProvid
     // Cập nhật Badge ngoài Icon App (Nếu cần đồng bộ ngay)
     NotificationService.refreshAppIconBadge();
 
+    // Hỏi máy chủ số của từng tab. Không hỏi được thì giữ nguyên bản cũ và
+    // huy hiệu tự lùi về đếm trong danh sách đã tải.
+    try {
+      final theoTab = await NotificationRepository.instance.soChuaDocTheoTab();
+      if (theoTab.isNotEmpty && mounted) {
+        setState(() => _soTheoTabTuMayChu = theoTab);
+      }
+    } catch (e) {
+      debugPrint("⚠️ [ThôngBáo] Chưa lấy được số chưa đọc theo tab: $e");
+    }
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('unread_notif_count', total);
     
@@ -229,6 +245,21 @@ class _ThongBaoScreenState extends State<ThongBaoScreen> with SingleTickerProvid
            _countUnreadInList(workNotifs) +
            _countUnreadInList(reminderNotifs) +
            _countUnreadInList(personalNotifs);
+  }
+
+  /// Số chưa đọc mỗi tab, do máy chủ tính trên TOÀN BỘ dữ liệu.
+  ///
+  /// Rỗng khi chưa hỏi được máy chủ — lúc đó [_soChuaDocCuaTab] tự lùi về đếm
+  /// trong danh sách đã tải.
+  Map<String, int> _soTheoTabTuMayChu = const {};
+
+  static const _nhomCuaTab = ['GENERAL', 'WORK', 'REMINDER', 'PERSONAL'];
+
+  /// Số hiện trên huy hiệu của tab thứ [viTri].
+  int _soChuaDocCuaTab(int viTri, List<dynamic> danhSachDaTai) {
+    final tuMayChu = _soTheoTabTuMayChu[_nhomCuaTab[viTri]];
+    if (tuMayChu != null) return tuMayChu;
+    return _countUnreadInList(danhSachDaTai);
   }
 
   int _countUnreadInList(List<dynamic> list) {
@@ -281,10 +312,10 @@ class _ThongBaoScreenState extends State<ThongBaoScreen> with SingleTickerProvid
           indicatorWeight: 3,
           labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 10),
           tabs: [
-            _buildTabWithBadge(labels[0], generalNotifs),
-            _buildTabWithBadge(labels[1], workNotifs),
-            _buildTabWithBadge(labels[2], reminderNotifs),
-            _buildTabWithBadge(labels[3], personalNotifs),
+            _buildTabWithBadge(labels[0], _soChuaDocCuaTab(0, generalNotifs)),
+            _buildTabWithBadge(labels[1], _soChuaDocCuaTab(1, workNotifs)),
+            _buildTabWithBadge(labels[2], _soChuaDocCuaTab(2, reminderNotifs)),
+            _buildTabWithBadge(labels[3], _soChuaDocCuaTab(3, personalNotifs)),
           ],
         ),
       ),
@@ -312,8 +343,7 @@ class _ThongBaoScreenState extends State<ThongBaoScreen> with SingleTickerProvid
     );
   }
 
-  Widget _buildTabWithBadge(String label, List<dynamic> list) {
-    int unreadCount = _countUnreadInList(list);
+  Widget _buildTabWithBadge(String label, int unreadCount) {
     return Tab(
       child: Stack(
         clipBehavior: Clip.none,
@@ -330,7 +360,9 @@ class _ThongBaoScreenState extends State<ThongBaoScreen> with SingleTickerProvid
                 ),
                 constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
                 child: Center(
-                  child: Text(unreadCount > 99 ? '99' : '$unreadCount', 
+                  // '99' trơn khiến 386 tin trông như đúng 99. Dấu cộng cho
+                  // biết đây là con số đã chặn trần.
+                  child: Text(unreadCount > 99 ? '99+' : '$unreadCount', 
                     style: const TextStyle(color: Colors.white, fontSize: 7, fontWeight: FontWeight.bold)),
                 ),
               ),
