@@ -64,35 +64,39 @@ class _ThongBaoScreenState extends State<ThongBaoScreen> with SingleTickerProvid
   }
 
   /// 🔥 HÀM TẢI DỮ LIỆU (TỐI ƯU TỐC ĐỘ: HIỆN OFFLINE TRƯỚC)
+  /// Nạp danh sách thông báo.
+  ///
+  /// ⚠️ GỘP 19/08/2026: gọi thẳng [NotificationRepository] — nơi DUY NHẤT lo
+  /// việc đọc SQLite, hỏi máy chủ, và dọn tin đã biến mất. Trước đó màn hình
+  /// tự làm bước đọc SQLite rồi gọi một lớp trung gian riêng, nên các cải tiến
+  /// viết trong kho dữ liệu không bao giờ chạy tới đây.
   Future<void> fetchNotifications() async {
     if (!mounted) return;
-    
-    final prefs = await SharedPreferences.getInstance();
-    final String? currentUserId = prefs.getString('user_code');
-    if (currentUserId == null) return;
 
-    // ⚡ BƯỚC A: Lấy dữ liệu từ SQLite (Instant - hiện ngay trong 0.1s)
-    final localData = await DatabaseHelper.instance.getOfflineNotifs(currentUserId);
-    if (mounted && localData.isNotEmpty) {
-      _updateGroups(localData); // Chia tin vào các tab
-      setState(() => isLoading = false); // Tắt loading ngay vì đã có tin cũ để xem
-    }
+    try {
+      // Kho dữ liệu trả về bản đã lưu NGAY, rồi gọi lại lần nữa khi đồng bộ
+      // xong với máy chủ.
+      final duLieuCu = await NotificationRepository.instance.layDanhSach(
+        khiCoDuLieuMoi: (duLieuMoi) {
+          if (!mounted) return;
+          _updateGroups(duLieuMoi);
+          setState(() {
+            isLoading = false;
+            khongTaiDuoc = duLieuMoi.isEmpty;
+          });
+          NotificationService.refreshAppIconBadge();
+        },
+      );
 
-    // 🌐 BƯỚC B: Chạy ngầm việc tải từ Server (Không bắt người dùng đợi)
-    NotificationService.fetchAndSyncNotifs(currentUserId).then((newData) {
       if (!mounted) return;
+      _updateGroups(duLieuCu);
 
-      // ⚠️ SỬA 18/08/2026: bản cũ chỉ tắt vòng xoay khi `newData.isNotEmpty`.
-      // Máy chủ trả về danh sách rỗng — hoặc lỗi mạng làm trả về rỗng — thì
-      // vòng xoay quay MÃI MÃI, người dùng tưởng ứng dụng treo. Nay luôn tắt,
-      // và phân biệt rõ "thật sự không có tin" với "không tải được".
-      _updateGroups(newData);
-      setState(() {
-        isLoading = false;
-        khongTaiDuoc = newData.isEmpty;
-      });
-      NotificationService.refreshAppIconBadge();
-    }).catchError((e) {
+      // ⚠️ SỬA 18/08/2026: bản cũ chỉ tắt vòng xoay khi có dữ liệu. Máy chủ trả
+      // về rỗng — hoặc lỗi mạng — thì vòng xoay quay MÃI MÃI và người dùng
+      // tưởng ứng dụng treo. Nay luôn tắt, và phân biệt rõ "thật sự không có
+      // tin" với "không tải được".
+      setState(() => isLoading = false);
+    } catch (e) {
       debugPrint("⚠️ Lỗi đồng bộ thông báo: $e");
       if (mounted) {
         setState(() {
@@ -100,7 +104,7 @@ class _ThongBaoScreenState extends State<ThongBaoScreen> with SingleTickerProvid
           khongTaiDuoc = true;
         });
       }
-    });
+    }
   }
 
   // --- 2. QUY HOẠCH TIN NHẮN VÀO TAB (LOGIC CHÍNH) ---

@@ -30,10 +30,23 @@ class NotificationRepository {
 
   // -- Đọc danh sách ---------------------------------------------------------
 
-  /// Lấy danh sách thông báo: hiện dữ liệu đã lưu ngay, rồi cập nhật từ máy chủ.
+  /// Lấy danh sách thông báo của người đang đăng nhập.
   ///
-  /// [khiCoDuLieuMoi] được gọi lần thứ hai nếu máy chủ trả về dữ liệu khác với
-  /// bản đã lưu — giao diện chỉ cần dựng lại khi thực sự có thay đổi.
+  /// Trả về dữ liệu đã lưu dưới máy TRƯỚC (hiện ngay, không chờ mạng), rồi gọi
+  /// [khiCoDuLieuMoi] lần thứ hai sau khi đồng bộ xong với máy chủ.
+  ///
+  /// ⚠️ GỘP 19/08/2026 — đây là nơi DUY NHẤT tải danh sách thông báo.
+  ///
+  /// Trước đó có HAI đường làm cùng việc này: `NotificationService
+  /// .fetchAndSyncNotifs` (màn hình thật sự gọi) và `layDanhSach` của lớp này
+  /// (không ai gọi). Hệ quả là mọi cải tiến viết vào lớp này đều không chạy —
+  /// đã xảy ra hai lần liên tiếp:
+  ///
+  ///   • Chức năng xoá: kho dữ liệu báo máy chủ đúng, nhưng màn hình tự ghi
+  ///     thẳng xuống SQLite nên tin xoá rồi vẫn quay lại.
+  ///   • Dọn tin đã biến mất: viết trong kho dữ liệu, không bao giờ chạy.
+  ///
+  /// Nay `NotificationService.fetchAndSyncNotifs` chỉ còn gọi lại hàm này.
   Future<List<dynamic>> layDanhSach({
     void Function(List<dynamic> duLieuMoi)? khiCoDuLieuMoi,
   }) async {
@@ -48,9 +61,9 @@ class NotificationRepository {
     //    trạng thái cũ và ghi đè lên phần người dùng đã đọc tại máy.
     await _traNoDanhDau(maNguoiDung);
 
-    // 3. Gọi máy chủ ở nền
+    // 3. Đồng bộ với máy chủ ở nền
     unawaited(
-      _capNhatTuMayChu(maNguoiDung).then((duLieuMoi) {
+      dongBoVoiMayChu(maNguoiDung).then((duLieuMoi) {
         if (duLieuMoi != null && khiCoDuLieuMoi != null) {
           khiCoDuLieuMoi(duLieuMoi);
         }
@@ -60,8 +73,15 @@ class NotificationRepository {
     return duLieuCu;
   }
 
-  Future<List<dynamic>?> _capNhatTuMayChu(String maNguoiDung) async {
-    final res = await Api.get('/api/get-notifs/$maNguoiDung');
+  /// Tải trang đầu từ máy chủ, ghi vào máy, dọn tin đã biến mất.
+  ///
+  /// Trả về danh sách sau khi đồng bộ, hoặc `null` nếu không gọi được máy chủ.
+  Future<List<dynamic>?> dongBoVoiMayChu(String maNguoiDung) async {
+    final res = await Api.get(
+      '/api/get-notifs/$maNguoiDung',
+      thamSo: {'page': '1'},
+      hanCho: const Duration(seconds: 10),
+    );
     if (!res.thanhCong) {
       debugPrint('⚠️ [ThôngBáo] Không tải được từ máy chủ: ${res.thongDiepLoi}');
       return null;
@@ -83,8 +103,9 @@ class NotificationRepository {
       // Bỏ khỏi máy những tin máy chủ không còn trả về nữa.
       //
       // Bộ nhớ đệm trước đây chỉ THÊM, không bao giờ BỎ — tin đã xoá trên máy
-      // chủ vẫn nằm lại dưới máy mãi mãi. Thấy tận mắt khi kiểm thử: bốn tin
-      // thử đã xoá khỏi cơ sở dữ liệu vẫn hiện nguyên trong ứng dụng.
+      // chủ nằm lại dưới máy mãi mãi. Chỉ dọn những tin MỚI HƠN tin cũ nhất của
+      // trang đầu: chúng lẽ ra phải có mặt ở trang này. Tin cũ hơn nằm ở các
+      // trang sau, chưa có căn cứ để kết luận nên phải giữ.
       if (maTuMayChu.isNotEmpty) {
         final maNhoNhat = maTuMayChu.reduce((a, b) => a < b ? a : b);
         final daDon = await _db.donTinDaBienMat(maNguoiDung, maTuMayChu, maNhoNhat);

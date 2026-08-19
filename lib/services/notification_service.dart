@@ -13,6 +13,7 @@ import 'database_helper.dart';
 import '../main.dart'; // Chứa navigatorKey toàn cục
 import '../views/thongbao_chitiet_screen.dart';
 import '../views/thongbao_screen.dart';
+import '../core/repositories/notification_repository.dart';
 import '../views/chatgroup/chat_group_list_page.dart';
 import '../core/api/api.dart';
 class NotificationService {
@@ -207,24 +208,25 @@ class NotificationService {
   }
 
   // --- 4. CẬP NHẬT BADGE NGOÀI ICON APP (BẢN FIX CHUẨN) ---
+  /// Cập nhật con số trên biểu tượng ứng dụng ở màn hình chính điện thoại.
+  ///
+  /// ⚠️ SỬA 19/08/2026: bản cũ tự viết câu truy vấn riêng và THIẾU điều kiện
+  /// `is_deleted_local = 0`. Hệ quả: tin người dùng đã xoá vẫn được tính vào
+  /// con số ngoài biểu tượng — xoá hết tin mà số vẫn còn, không cách nào làm
+  /// nó về 0.
+  ///
+  /// Đây là cách đếm THỨ BA trong cùng một ứng dụng. Nay dùng chung
+  /// [DatabaseHelper.getUnreadCount] với mọi chỗ khác.
   static Future<void> refreshAppIconBadge() async {
     final db = DatabaseHelper.instance;
     final String? userId = await db.getLoggedInUserId();
-    
-    if (userId != null) {
-      final database = await db.database;
-      // Truy vấn trực tiếp vào DB để đếm chính xác số 0/1
-      final List<Map<String, dynamic>> result = await database.rawQuery(
-        'SELECT id FROM notifications WHERE UserCode = ? AND IsRead = 0',
-        [userId]
-      );
+    if (userId == null) return;
 
-      int unreadCount = result.length;
-      if (unreadCount > 0) {
-        FlutterAppBadger.updateBadgeCount(unreadCount);
-      } else {
-        FlutterAppBadger.removeBadge();
-      }
+    final soChuaDoc = await db.getUnreadCount(userId);
+    if (soChuaDoc > 0) {
+      FlutterAppBadger.updateBadgeCount(soChuaDoc);
+    } else {
+      FlutterAppBadger.removeBadge();
     }
   }
 
@@ -260,62 +262,25 @@ class NotificationService {
   }
 
   // --- 6. ĐỒNG BỘ TIN NHẮN TỪ SERVER VỀ SQLITE ---
+  /// Tải và đồng bộ danh sách thông báo.
+  ///
+  /// ⚠️ GỘP 19/08/2026 — hàm này nay chỉ CHUYỂN TIẾP sang
+  /// [NotificationRepository.dongBoVoiMayChu].
+  ///
+  /// Trước đó nó là một bản cài đặt RIÊNG, song song với kho dữ liệu. Hai đường
+  /// làm cùng một việc mà màn hình chỉ đi một đường, nên mọi cải tiến viết vào
+  /// đường kia đều không chạy. Đã mất công truy hai lần liên tiếp vì đúng
+  /// chuyện này: chức năng xoá, rồi việc dọn tin đã biến mất.
+  ///
+  /// Giữ lại tên hàm để mã đang gọi không phải sửa, nhưng ruột chỉ còn một chỗ.
   static Future<List<dynamic>> fetchAndSyncNotifs(String userId) async {
-    // 1. Lấy dữ liệu cũ từ SQLite
-    List<dynamic> localData = await DatabaseHelper.instance.getOfflineNotifs(userId);
-
-    try {
-      final res = await Api.get(
-        "/api/get-notifs/$userId",
-        thamSo: {"page": "1"},
-        hanCho: const Duration(seconds: 10),
-      );
-
-      if (res.thanhCong) {
-        final duLieu = res.data;
-        final List<dynamic> serverData =
-            duLieu is List ? duLieu : (duLieu is Map ? (duLieu['data'] as List? ?? []) : []);
-
-        final maTuMayChu = <int>{};
-        for (var n in serverData) {
-          // Lưu vào SQLite
-          await DatabaseHelper.instance.insertNotification(n, userId);
-          final ma = (n is Map) ? (n['ID'] ?? n['id']) : null;
-          final soMa = ma is int ? ma : int.tryParse('$ma');
-          if (soMa != null) maTuMayChu.add(soMa);
-        }
-
-        // Bỏ khỏi máy những tin máy chủ không còn trả về nữa.
-        //
-        // ⚠️ THÊM 19/08/2026: bộ nhớ đệm trước đây chỉ THÊM, không bao giờ BỎ.
-        // Tin đã xoá trên máy chủ nằm lại dưới máy mãi mãi, và danh sách lệch
-        // dần theo thời gian. Thấy tận mắt khi kiểm thử: bốn tin thử đã xoá
-        // khỏi cơ sở dữ liệu vẫn hiện nguyên trong ứng dụng.
-        //
-        // Chỉ dọn những tin MỚI HƠN tin cũ nhất của trang đầu — chúng lẽ ra
-        // phải có mặt ở trang đầu mà lại không. Tin cũ hơn nằm ở các trang sau,
-        // chưa có căn cứ để kết luận nên phải giữ.
-        if (maTuMayChu.isNotEmpty) {
-          final maNhoNhat = maTuMayChu.reduce((a, b) => a < b ? a : b);
-          final daDon = await DatabaseHelper.instance
-              .donTinDaBienMat(userId, maTuMayChu, maNhoNhat);
-          if (daDon > 0) {
-            debugPrint("🧹 [ThôngBáo] Đã bỏ $daDon tin không còn trên máy chủ");
-          }
-        }
-
-        // Trả về dữ liệu mới nhất sau khi đồng bộ
-        List<dynamic> updatedLocal = await DatabaseHelper.instance.getOfflineNotifs(userId);
-        
-        // Cập nhật Badge sau khi đồng bộ
-        refreshAppIconBadge();
-        
-        return updatedLocal;
-      }
-    } catch (e) {
-      debugPrint("🔥 [ThôngBáo] Lỗi đồng bộ danh sách: $e");
+    final moi = await NotificationRepository.instance.dongBoVoiMayChu(userId);
+    if (moi != null) {
+      refreshAppIconBadge();
+      return moi;
     }
-    return localData;
+    // Không gọi được máy chủ thì vẫn trả dữ liệu đang có dưới máy
+    return DatabaseHelper.instance.getOfflineNotifs(userId);
   }
 
   // Lấy Route ban đầu cho Splash Screen

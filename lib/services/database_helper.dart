@@ -355,15 +355,10 @@ Future<void> clearMenuCache() async {
   debugPrint("🗑️ [SQLite] Đã xóa cache Menu.");
 }
 // 🔥 Hàm xóa thông báo local (Đánh dấu flag)
-Future<int> deleteNotificationLocal(int id) async {
-  final db = await database;
-  return await db.update(
-    'notifications', 
-    {'is_deleted_local': 1}, 
-    where: 'id = ?', 
-    whereArgs: [id]
-  );
-}
+// Đã bỏ 19/08/2026: `deleteNotificationLocal` giống hệt
+// `softDeleteNotification` ở trên — cùng bảng, cùng cột, cùng điều kiện. Hai
+// hàm y hệt nhau khiến mỗi màn hình gọi một cái, và bản sửa cho cái này không
+// áp cho cái kia. Nay chỉ còn `softDeleteNotification`.
   Future<List<Map<String, dynamic>>> getChatHistory(String groupId) async {
     final db = await database;
     final List<Map<String, dynamic>> res = await db.query(
