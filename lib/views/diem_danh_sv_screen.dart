@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
@@ -58,9 +59,13 @@ class _DiemDanhSvScreenState extends State<DiemDanhSvScreen> {
       // B. Xác thực Sinh trắc học (FaceID/Vân tay)
       bool didAuthenticate = await auth.authenticate(
         localizedReason: 'Xác thực chính chủ để hoàn tất điểm danh',
-        options: const AuthenticationOptions(
-          biometricOnly: true, 
-          stickyAuth: true
+        // ⚠️ SỬA 19/08/2026: `biometricOnly: true` cứng làm máy KHÔNG có vân
+        // tay hay khuôn mặt không điểm danh được bằng bất kỳ cách nào. Nay máy
+        // nào có thì dùng, không có thì lùi về khoá màn hình — vẫn là xác thực
+        // chính chủ, và sinh viên không bị chặn khỏi việc điểm danh.
+        options: AuthenticationOptions(
+          biometricOnly: await auth.canCheckBiometrics,
+          stickyAuth: true,
         ),
       );
 
@@ -117,7 +122,18 @@ class _DiemDanhSvScreenState extends State<DiemDanhSvScreen> {
       if (permission == LocationPermission.denied) return Future.error('Quyền vị trí bị từ chối!');
     }
     // Lấy vị trí với độ chính xác cao
-    return await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+    // ⚠️ SỬA 19/08/2026: thêm hạn chờ. Trong phòng học kín, GPS có thể tìm mãi
+    // không ra và màn hình đứng im vô hạn — sinh viên tưởng ứng dụng treo, bỏ
+    // đi, rồi bị tính vắng.
+    return await Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    ).timeout(
+      const Duration(seconds: 12),
+      onTimeout: () => throw TimeoutException(
+        'Chưa lấy được vị trí sau 12 giây. Ra chỗ thoáng hoặc bật lại định vị '
+        'rồi thử lại.',
+      ),
+    );
   }
 
   // --- 4. GIAO DIỆN CHÍNH ---

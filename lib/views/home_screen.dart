@@ -242,20 +242,89 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Quét mã QR rồi điểm danh.
+  ///
+  /// ⚠️ SỬA 19/08/2026, ba điểm — đây là luồng ảnh hưởng trực tiếp tới điểm
+  /// chuyên cần nên sai một chút là sinh viên chịu thiệt:
+  ///
+  ///   • Máy KHÔNG có vân tay/khuôn mặt thì `biometricOnly: true` ném lỗi, và
+  ///     sinh viên không điểm danh được bằng bất kỳ cách nào. Nay lùi về khoá
+  ///     màn hình (mã PIN) — vẫn là xác thực chính chủ.
+  ///   • `getCurrentPosition` KHÔNG có hạn chờ. Trong phòng học kín, GPS có thể
+  ///     tìm mãi không ra và màn hình đứng im vô hạn. Nay chờ tối đa 12 giây.
+  ///   • Ba nguyên nhân rất khác nhau — không xác thực được, không lấy được vị
+  ///     trí, lỗi khác — trước đây gộp chung một câu. Nay nói rõ từng cái.
   void _handleQRScan() async {
-    final String? qrResult = await Navigator.push(context, MaterialPageRoute(builder: (context) => const QRScannerScreen()));
-    if (qrResult != null && qrResult.isNotEmpty) {
-      final LocalAuthentication auth = LocalAuthentication();
-      try {
-        bool didAuthenticate = await auth.authenticate(localizedReason: 'Xác thực để hoàn tất điểm danh qua QR', options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true));
-        if (!didAuthenticate) return;
-        Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-        _submitAttendance(qrResult, lat: position.latitude, lon: position.longitude, isBiometric: true);
-      } catch (e) { _showErrorSnackBar("Lỗi xác thực hoặc GPS: $e"); }
+    final String? qrResult = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const QRScannerScreen()),
+    );
+    if (qrResult == null || qrResult.isEmpty) return;
+
+    final auth = LocalAuthentication();
+
+    // 1. Xác thực chính chủ
+    bool daXacThuc = false;
+    bool bangSinhTrac = true;
+    try {
+      final coSinhTrac = await auth.canCheckBiometrics;
+      bangSinhTrac = coSinhTrac;
+      daXacThuc = await auth.authenticate(
+        localizedReason: 'Xác thực để hoàn tất điểm danh qua QR',
+        options: AuthenticationOptions(
+          biometricOnly: coSinhTrac,
+          stickyAuth: true,
+        ),
+      );
+    } catch (e) {
+      debugPrint("⚠️ Lỗi xác thực: $e");
+      if (mounted) {
+        _showErrorSnackBar("Không xác thực được. Kiểm tra cài đặt vân tay, "
+            "khuôn mặt hoặc mã khoá màn hình của máy.");
+      }
+      return;
     }
+    if (!daXacThuc) return;
+
+    // 2. Lấy vị trí
+    Position viTri;
+    try {
+      viTri = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      ).timeout(const Duration(seconds: 12));
+    } on TimeoutException {
+      if (mounted) {
+        _showErrorSnackBar("Chưa lấy được vị trí sau 12 giây. Ra chỗ thoáng "
+            "hoặc bật lại định vị rồi quét lại.");
+      }
+      return;
+    } catch (e) {
+      debugPrint("⚠️ Lỗi GPS: $e");
+      if (mounted) {
+        _showErrorSnackBar("Không lấy được vị trí. Vui lòng bật định vị và "
+            "cho phép ứng dụng truy cập.");
+      }
+      return;
+    }
+
+    _submitAttendance(qrResult,
+        lat: viTri.latitude, lon: viTri.longitude, isBiometric: bangSinhTrac);
   }
 
-  Future<void> _submitAttendance(String code, {double? lat, double? lon, bool isBiometric = false}) async {
+  /// Gửi điểm danh lên máy chủ.
+  ///
+  /// ⚠️ SỬA 19/08/2026: bản cũ đọc thẳng `jsonDecode(response.body)` mà không
+  /// xem mã trạng thái. Máy chủ trả 500 kèm trang lỗi HTML, hoặc 401 khi hết
+  /// phiên, thì `jsonDecode` ném ngoại lệ và sinh viên chỉ thấy "Lỗi kết nối
+  /// Server" — dù máy chủ đã kết nối được và vấn đề nằm chỗ khác.
+  ///
+  /// Với điểm danh, "không biết mình đã được ghi nhận chưa" là điều tệ nhất:
+  /// sinh viên bỏ đi rồi mới biết bị vắng.
+  ///
+  /// Màn diem_danh_sv_screen.dart đã sửa từ 18/08; màn này là đường THỨ HAI
+  /// cùng làm việc đó mà lúc ấy bỏ sót.
+  Future<void> _submitAttendance(String code,
+      {double? lat, double? lon, bool isBiometric = false}) async {
     setState(() => _isLoading = true);
     try {
       final response = await Api.post("/api/attendance/submit", duLieu: {
@@ -265,11 +334,25 @@ class _HomeScreenState extends State<HomeScreen> {
         "lon": lon ?? 0.0,
         "is_biometric_valid": isBiometric,
       });
-      final resData = jsonDecode(response.body);
-      if (resData['status'] == 'success') { _showSuccessDialog("✅ Điểm danh thành công!"); }
-      else { _showSnackBar(resData['message'] ?? "Lỗi điểm danh", Colors.red); }
-    } catch (e) { _showSnackBar("🔥 Lỗi kết nối Server!", Colors.red); }
-    finally { setState(() => _isLoading = false); }
+      if (!mounted) return;
+
+      if (!response.thanhCong) {
+        _showSnackBar(response.thongDiepLoi, Colors.red);
+        return;
+      }
+
+      final resData = response.data is Map ? response.data as Map : const {};
+      if (resData['status'] == 'success') {
+        _showSuccessDialog("✅ Điểm danh thành công!");
+      } else {
+        _showSnackBar(resData['message'] ?? "Mã điểm danh không đúng", Colors.red);
+      }
+    } catch (e) {
+      debugPrint("🔥 Lỗi gửi điểm danh: $e");
+      if (mounted) _showSnackBar("Không gửi được điểm danh. Vui lòng thử lại.", Colors.red);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   void _showSnackBar(String msg, Color color) {
