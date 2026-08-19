@@ -30,7 +30,7 @@ def clean_student_id(raw_id: str) -> str:
 # 1. API TÌM KIẾM MÔN HỌC & ĐIỂM SỐ (ĐÃ FIX LỖI ÉP KIỂU INT)
 # =======================================================
 @router.get("/search-subject")
-async def search_subject(
+def search_subject(
     student_id: str = Query(..., description="Mã sinh viên"),
     keyword: str = Query("", description="Từ khóa tìm kiếm")
 ):
@@ -89,7 +89,7 @@ async def search_subject(
 # 2. API TÌM KIẾM THÔNG BÁO (CHUẨN 100%)
 # =======================================================
 @router.get("/search-notification")
-async def search_notification(
+def search_notification(
     student_id: str = Query(..., description="Mã sinh viên"),
     keyword: str = Query("", description="Từ khóa tìm kiếm")
 ):

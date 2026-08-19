@@ -92,16 +92,21 @@ class NotificationRepository {
     await _db.updateReadStatus(maTin);
 
     final maNguoiDung = await Session.userCode;
-    unawaited(
-      Api.post('/api/mark-read/$maTin', duLieu: {'student_id': maNguoiDung})
-          .then((res) async {
-        if (!res.thanhCong) {
-          debugPrint('⚠️ [ThôngBáo] Máy chủ chưa ghi nhận đã đọc tin $maTin: '
-              '${res.thongDiepLoi}');
-          await _xepHang(maNguoiDung, '$maTin');
-        }
-      }),
-    );
+
+    // Rồi mới CHỜ máy chủ xác nhận.
+    //
+    // ⚠️ SỬA 19/08/2026: bản trước không chờ. Giao diện gọi làm mới huy hiệu
+    // ngay sau đó, máy chủ chưa kịp ghi, nên con số trả về vẫn là số cũ —
+    // người dùng đọc một tin mà huy hiệu đứng yên.
+    //
+    // Chờ ở đây KHÔNG làm giao diện chậm: phần hiển thị đã đổi ở dòng trên.
+    final res = await Api.post('/api/mark-read/$maTin',
+        duLieu: {'student_id': maNguoiDung});
+    if (!res.thanhCong) {
+      debugPrint('⚠️ [ThôngBáo] Máy chủ chưa ghi nhận đã đọc tin $maTin: '
+          '${res.thongDiepLoi}');
+      await _xepHang(maNguoiDung, '$maTin');
+    }
   }
 
   /// Đánh dấu toàn bộ thông báo đã đọc.
@@ -230,19 +235,26 @@ class NotificationRepository {
 
   /// Số chưa đọc dùng cho huy hiệu ở thanh điều hướng.
   ///
-  /// Sửa 18/08/2026 — trước đó huy hiệu hỏi thẳng `/api/count-unread` còn danh
-  /// sách đọc từ SQLite. Hai nguồn khác nhau nên lệch nhau ngay khi máy chủ
-  /// chưa kịp ghi nhận: huy hiệu báo 12 mà mở ra không còn tin nào chưa đọc.
+  /// Hỏi máy chủ trước; chỉ dùng số tại máy khi không gọi được.
   ///
-  /// Nay lấy số tại máy làm chuẩn, vì đó chính là những gì người dùng sẽ thấy
-  /// khi bấm vào. Chỉ hỏi máy chủ khi máy chưa có dữ liệu nào — tức lần đầu cài
-  /// đặt, lúc mà số tại máy bằng 0 không phải vì đã đọc hết mà vì chưa tải về.
+  /// ⚠️ ĐÂY LÀ LẦN SỬA THỨ HAI của cùng một chỗ, chép lại đủ để lần sau không
+  /// đi vòng lại:
+  ///
+  ///   • Ban đầu huy hiệu hỏi thẳng máy chủ còn danh sách đọc từ SQLite. Khi
+  ///     máy chủ chưa có endpoint đánh dấu tất cả đã đọc, hai bên lệch nhau:
+  ///     huy hiệu báo 12 mà mở ra không còn tin nào chưa đọc.
+  ///   • 18/08/2026 tôi đổi sang đếm tại máy cho khớp danh sách. Nhưng máy chỉ
+  ///     giữ những tin ĐÃ TẢI VỀ — trang đầu 20 tin. Đo trên tài khoản thật:
+  ///     máy đếm 13 trong khi số thật là 386. Huy hiệu khớp danh sách nhưng
+  ///     nói sai sự thật.
+  ///
+  /// Nguyên nhân của lần lệch đầu tiên nay đã hết: máy chủ đã có endpoint đánh
+  /// dấu tất cả đã đọc, `count-unread` đã đếm cả hai nguồn dữ liệu, và
+  /// [danhDauDaDoc] chờ máy chủ xác nhận xong mới để giao diện làm mới. Vậy
+  /// máy chủ trở lại là nguồn đúng — nó biết cả những tin chưa tải về.
   Future<int> soChuaDocChoHuyHieu() async {
     final maNguoiDung = await Session.userCode;
     if (maNguoiDung.isEmpty) return 0;
-
-    final daCoDuLieu = (await _db.getOfflineNotifs(maNguoiDung)).isNotEmpty;
-    if (daCoDuLieu) return _db.getUnreadCount(maNguoiDung);
 
     final res = await Api.get('/api/count-unread/$maNguoiDung');
     if (res.thanhCong && res.data is Map) {
@@ -250,7 +262,10 @@ class NotificationRepository {
       if (so is int) return so;
       if (so is String) return int.tryParse(so) ?? 0;
     }
-    return 0;
+
+    // Mất mạng thì vẫn hiện một con số có ý nghĩa, còn hơn để trống
+    debugPrint('⚠️ [ThôngBáo] Không hỏi được máy chủ, dùng số tại máy');
+    return _db.getUnreadCount(maNguoiDung);
   }
 }
 

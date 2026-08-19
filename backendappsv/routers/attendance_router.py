@@ -28,7 +28,7 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 # 1. API LẤY DANH SÁCH HỌC KỲ (Để đổ vào Dropdown 1)
 # =================================================================
 @router.get("/semesters")
-async def get_semesters():
+def get_semesters():
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -42,7 +42,7 @@ async def get_semesters():
 # 2. API LẤY DANH SÁCH BUỔI HỌC CỦA LỚP (Để Dropdown 3)
 # =================================================================
 @router.get("/sessions-by-class/{lhp_code}")
-async def get_sessions_by_class(lhp_code: str):
+def get_sessions_by_class(lhp_code: str):
     try:
         clean_lhp = urllib.parse.unquote(lhp_code).strip()
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
@@ -56,7 +56,7 @@ async def get_sessions_by_class(lhp_code: str):
 # 3. GIẢNG VIÊN: MỞ PHIÊN (Fix LHP_ID NULL & Cho phép chọn ngày)
 # =================================================================
 @router.post("/create-session")
-async def create_attendance_session(data: dict):
+def create_attendance_session(data: dict):
     try:
         lhp_code = data.get("lhp_code")
         lecturer_id = str(data.get("lecturer_id")).upper().replace("CB", "").strip()
@@ -99,7 +99,7 @@ async def create_attendance_session(data: dict):
 # 2. GIẢNG VIÊN: ĐIỂM DANH TAY (Muộn, Vắng, Phép)
 # =================================================================
 @router.post("/manual-submit")
-async def manual_submit(data: dict):
+def manual_submit(data: dict):
     try:
         buoi_hoc_id = data.get("buoi_hoc_id")
         sid = str(data.get("student_id")).upper().replace("SV", "").strip()
@@ -142,7 +142,7 @@ async def manual_submit(data: dict):
 # 2. API KẾT THÚC ĐIỂM DANH (Đóng phiên ngay lập tức)
 # =================================================================
 @router.post("/end-session/{buoi_id}")
-async def end_attendance_session(buoi_id: int):
+def end_attendance_session(buoi_id: int):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -157,7 +157,7 @@ async def end_attendance_session(buoi_id: int):
 # 3. FIX LỖI FILE EXCEL TRẮNG
 # =================================================================
 @router.get("/export-excel/{lhp_code}")
-async def export_attendance_excel(lhp_code: str):
+def export_attendance_excel(lhp_code: str):
     try:
         clean_lhp = urllib.parse.unquote(lhp_code).strip()
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
@@ -192,7 +192,7 @@ async def export_attendance_excel(lhp_code: str):
 # 4. THỐNG KÊ CHI TIẾT SINH VIÊN (Dùng cho cửa sổ báo cáo trên App)
 # =================================================================
 @router.get("/student-summary/{lhp_code}/{student_id}")
-async def get_student_summary(lhp_code: str, student_id: str):
+def get_student_summary(lhp_code: str, student_id: str):
     try:
         sid = student_id.upper().replace("SV", "").strip()
         clean_lhp = urllib.parse.unquote(lhp_code).strip()
@@ -217,7 +217,7 @@ async def get_student_summary(lhp_code: str, student_id: str):
 # 2. SINH VIÊN: GỬI ĐIỂM DANH (Cập nhật tbl_DiemDanh_ChiTiet)
 # =================================================================
 @router.post("/submit")
-async def submit_attendance(data: dict):
+def submit_attendance(data: dict):
     try:
         student_id = str(data.get("student_id", "")).upper().replace("SV", "").strip()
         code_input = "".join(filter(str.isdigit, str(data.get("code", ""))))
@@ -276,7 +276,7 @@ async def submit_attendance(data: dict):
 # --- TRONG attendance_router.py ---
 
 @router.get("/current-session-info/{buoi_id}")
-async def get_current_session_info(buoi_id: int):
+def get_current_session_info(buoi_id: int):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -293,7 +293,7 @@ async def get_current_session_info(buoi_id: int):
         return {"status": "error", "code": "----"}
 
 @router.get("/session-report/{buoi_id}")
-async def get_session_report(buoi_id: int):
+def get_session_report(buoi_id: int):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -347,7 +347,7 @@ async def get_session_report(buoi_id: int):
         return {"status": "error", "message": str(e), "data": []}
 # API Gia hạn hoặc đổi mã PIN mới cho Buổi học hiện tại
 @router.post("/refresh-pin")
-async def refresh_pin(data: dict):
+def refresh_pin(data: dict):
     try:
         buoi_id = data.get("buoi_id")
         duration = data.get("duration", 15)

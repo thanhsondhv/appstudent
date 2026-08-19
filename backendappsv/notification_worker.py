@@ -252,7 +252,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan, title="VinhUni — Bộ quét nhắc lịch")
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard():
+def dashboard():
     history_html = ""
     try:
         with pyodbc.connect(CONN_STR) as conn:

@@ -23,7 +23,7 @@ def clean_student_id(raw_id: str) -> str:
 # 1. LẤY DANH SÁCH NGÀNH HỌC (CHO COMBOBOX)
 # =========================================================
 @router.get("/student-programs/{student_id}")
-async def get_student_programs(student_id: str):
+def get_student_programs(student_id: str):
     """API lấy danh sách các ngành học của sinh viên để đổ vào Combobox"""
     try:
         sid = clean_student_id(student_id)
@@ -67,7 +67,7 @@ async def get_student_programs(student_id: str):
 # 3. LẤY KHUNG CHƯƠNG TRÌNH KÈM TIẾN ĐỘ (ĐÃ HỌC / CHƯA HỌC)
 # =========================================================
 @router.get("/curriculum-progress/{program_id}")
-async def get_curriculum_progress(program_id: int, student_id: str = Query(...)):
+def get_curriculum_progress(program_id: int, student_id: str = Query(...)):
     """API mới: Lấy Khung chương trình và trạng thái Đã học / Chưa học của 1 sinh viên cụ thể"""
     try:
         sid = clean_student_id(student_id)
@@ -118,7 +118,7 @@ async def get_curriculum_progress(program_id: int, student_id: str = Query(...))
 # 4. BẢNG ĐIỂM TỔNG HỢP THEO HỌC KỲ (Dùng OPENQUERY qua con 200)
 # =========================================================
 @router.get("/transcript-summary/{student_id}")
-async def get_transcript_summary(student_id: str, program_id: str = Query("ALL")):
+def get_transcript_summary(student_id: str, program_id: str = Query("ALL")):
     """API lấy Bảng điểm tổng hợp của sinh viên từ Server 200"""
     try:
         sid = clean_student_id(student_id)
@@ -191,7 +191,7 @@ async def get_transcript_summary(student_id: str, program_id: str = Query("ALL")
 # 5. LẤY THÔNG TIN TÀI CHÍNH & HỌC PHÍ (TỪ SERVER 200)
 # =========================================================
 @router.get("/finance/{student_id}")
-async def get_finance_info(student_id: str):
+def get_finance_info(student_id: str):
     """API lấy Tổng công nợ, Số dư ví, Chi tiết học phí và Lịch sử giao dịch"""
     try:
         sid = clean_student_id(student_id)
@@ -340,7 +340,7 @@ async def get_finance_info(student_id: str):
 # 6. TRA CỨU BẢO HIỂM Y TẾ (BHYT)
 # =========================================================
 @router.get("/bhyt/{student_id}")
-async def get_bhyt_info(student_id: str):
+def get_bhyt_info(student_id: str):
     try:
         sid = clean_student_id(student_id)
         conn_str = DBConfig.get_connection_string()
@@ -457,7 +457,7 @@ async def get_bhyt_info(student_id: str):
 # Giả sử DBConfig đã được Sơn định nghĩa sẵn
 
 @router.get("/app-menu")
-async def get_app_menu(current_user: dict = Depends(verify_token)):
+def get_app_menu(current_user: dict = Depends(verify_token)):
     """
     API lấy danh sách Menu dựa trên Role thực tế trong Database.
     Tích hợp hệ thống Audit Log để giám sát truy cập của đối tượng đặc biệt.
@@ -532,7 +532,7 @@ async def get_app_menu(current_user: dict = Depends(verify_token)):
 # =========================================================
 # 6. LẤY THÔNG TIN TỔNG HỢP: HỒ SƠ + ĐIỂM TÍCH LŨY TỪNG NGÀNH
 @router.get("/student-info/{student_id}")
-async def get_student_info(student_id: str):
+def get_student_info(student_id: str):
     try:
         sid = clean_student_id(student_id)
         conn_str = DBConfig.get_connection_string()
@@ -614,7 +614,7 @@ def clean_any_id(raw_id: str) -> str:
 
 
 @router.get("/lecturer/classes-filtered")
-async def get_lecturer_classes_filtered(
+def get_lecturer_classes_filtered(
     lecturer_id: str = Query(...),
     nam: str = Query(...), 
     ky: str = Query(...),  
@@ -666,7 +666,7 @@ REMOTE_CONN_STR = settings.db.local_conn_str
 
 
 @router.post("/lecturer/send-notification")
-async def send_notification(data: dict):
+def send_notification(data: dict):
     # data: title, content, type, target_id, sender_id (Cần Flutter gửi thêm cái này)
     try:
         title = data.get("title")
@@ -740,7 +740,7 @@ async def send_notification(data: dict):
 
 
 @router.get("/lecturer/schedule-v4/{lecturer_id}")
-async def get_lecturer_schedule_v4(
+def get_lecturer_schedule_v4(
     lecturer_id: str, 
     nam: str = Query(..., description="VD: 2025-2026"), 
     ky: str = Query(...), 
@@ -803,7 +803,7 @@ async def get_lecturer_schedule_v4(
         return {"status": "error", "message": str(e)}
         
 @router.post("/lecturer/attendance-scan")
-async def attendance_scan(data: dict):
+def attendance_scan(data: dict):
     class_id = data.get("class_id")
     student_cccd = data.get("student_cccd") # Mã lấy được từ QR
     
@@ -876,7 +876,7 @@ async def attendance_scan(data: dict):
 
 # # --- API 2: LẤY CHI TIẾT SINH VIÊN THUỘC CÁC LỚP SĨ SỐ ÍT ---
 @router.get("/admin/low-enrollment-students")
-async def get_low_enrollment_students(
+def get_low_enrollment_students(
     nam: str = Query(...),
     ky: str = Query(...),
     threshold: int = Query(20)
@@ -1000,7 +1000,7 @@ async def get_low_enrollment_students(
         # return {"status": "error", "message": f"Lỗi Server: {str(e)}"}
 # API Lấy danh sách lớp lý thuyết sĩ số thấp
 @router.get("/admin/low-enrollment-theory-classes")
-async def get_low_enrollment_theory(
+def get_low_enrollment_theory(
     nam: str = Query(..., description="Ví dụ: 2025-2026"),
     ky: str = Query(..., description="Ví dụ: Học kỳ 2.1"),
     threshold: int = Query(20)
@@ -1066,7 +1066,7 @@ async def get_low_enrollment_theory(
         return {"status": "error", "message": str(e)}
 #gui cho sinh vien lớp học phần ít sv
 @router.post("/admin/send-notification-multi-lhp-theory")
-async def send_notification_multi_lhp_theory(data: dict):
+def send_notification_multi_lhp_theory(data: dict):
     try:
         title = data.get("title", "").strip()
         content = data.get("content", "").strip()
@@ -1142,7 +1142,7 @@ async def send_notification_multi_lhp_theory(data: dict):
                 
 #Hàm láy sinh viên cùng CAN BỘ CỐ VẤN ĐỀ GUI TIN-API này giúp Cố vấn/Giảng viên thấy được tất cả các lớp mà Khoa mình đang quản lý.
 @router.get("/lecturer/assigned-classes")
-async def get_lecturer_assigned_classes(lecturer_id: str = Query(..., description="Mã cán bộ hoặc HS_ID")):
+def get_lecturer_assigned_classes(lecturer_id: str = Query(..., description="Mã cán bộ hoặc HS_ID")):
     try:
         raw_id = lecturer_id.strip().upper().replace("CB", "")
         
@@ -1183,7 +1183,7 @@ async def get_lecturer_assigned_classes(lecturer_id: str = Query(..., descriptio
         
 #Admin hoặc Cố vấn chọn một lớp từ danh sách trên, Flutter sẽ gọi API này để xem chi tiế
 @router.get("/lecturer/class-details")
-async def get_class_details(ten_lop: str = Query(..., description="Tên lớp hành chính")):
+def get_class_details(ten_lop: str = Query(..., description="Tên lớp hành chính")):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -1220,7 +1220,7 @@ async def get_class_details(ten_lop: str = Query(..., description="Tên lớp h�
         
 #API: Lấy danh sách Khoa/Viện
 @router.get("/admin/get-faculties/{lecturer_id}") # Chuyển sang Path Parameter
-async def get_faculties(lecturer_id: str):
+def get_faculties(lecturer_id: str):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -1239,7 +1239,7 @@ async def get_faculties(lecturer_id: str):
         return {"status": "error", "message": str(e)}
 #Lấy danh sách lớp thuộc Khoa
 @router.get("/lecturer/assigned-classes")
-async def get_assigned_classes(lecturer_id: str = Query(...)):
+def get_assigned_classes(lecturer_id: str = Query(...)):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -1264,7 +1264,7 @@ async def get_assigned_classes(lecturer_id: str = Query(...)):
         return {"status": "error", "message": str(e)}
         #Lấy danh sách lớp thuộc Khoa + Khóa
 @router.get("/admin/get-classes-by-cohort")
-async def get_classes_by_cohort(id_khoa: str = Query(...), cohort: str = Query(...)):
+def get_classes_by_cohort(id_khoa: str = Query(...), cohort: str = Query(...)):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -1288,7 +1288,7 @@ import uuid # Dùng để sinh mã ExternalId duy nhất
 from datetime import datetime
 
 @router.post("/admin/send-notification-dept-cohort")
-async def send_notification_dept_cohort(data: dict):
+def send_notification_dept_cohort(data: dict):
     print("\n🚀 [DEBUG] Bắt đầu gửi tin và ghi Log chi tiết")
     try:
         title = data.get("title", "").strip()
@@ -1430,7 +1430,7 @@ async def send_notification_dept_cohort(data: dict):
         # print(f"🔥 Lỗi gửi toàn trường: {e}")
         # return {"status": "error", "message": str(e)}        
 @router.post("/admin/send-notification-all")
-async def send_notification_all(data: dict):
+def send_notification_all(data: dict):
     print(f"\n📢 [GLOBAL] Gửi tin toàn trường: {data.get('target_type')}")
     try:
         title = data.get("title", "").strip()

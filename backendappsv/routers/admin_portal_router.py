@@ -243,7 +243,7 @@ async def nhat_ky_ai(
 
 
 @router.get("/thong-ke")
-async def thong_ke(me: Identity = Depends(require_staff)) -> dict[str, Any]:
+def thong_ke(me: Identity = Depends(require_staff)) -> dict[str, Any]:
     """Vài con số nghiệp vụ cho trang chủ cổng quản trị.
 
     Mở cho cán bộ chứ không chỉ quản trị viên — trưởng khoa cũng cần nhìn số

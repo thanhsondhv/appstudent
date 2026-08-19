@@ -24,7 +24,7 @@ class NotifSettingUpdate(BaseModel):
     lead_time: Optional[int] = 30
 
 @router.get("/settings/{user_id}")
-async def get_user_settings(user_id: str):
+def get_user_settings(user_id: str):
     conn = None
     try:
         conn = get_db_conn()
@@ -69,7 +69,7 @@ async def get_user_settings(user_id: str):
         if conn: conn.close()
 
 @router.post("/update")
-async def update_setting(data: NotifSettingUpdate):
+def update_setting(data: NotifSettingUpdate):
     conn = None
     try:
         conn = get_db_conn()

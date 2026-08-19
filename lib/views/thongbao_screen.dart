@@ -174,15 +174,39 @@ class _ThongBaoScreenState extends State<ThongBaoScreen> with SingleTickerProvid
     _tabController.animateTo(dich);
   }
 
+  /// Tin này thuộc tab nào.
+  ///
+  /// Máy chủ đã tính sẵn `TabGroup`; bảng dưới đây chỉ là đường lui cho những
+  /// tin cũ trong bộ nhớ máy chưa có trường đó.
+  ///
+  /// ⚠️ SỬA 19/08/2026, hai điểm:
+  ///
+  ///   • Thiếu nhóm 'THI' — nhóm ĐÔNG NHẤT (336/471 tin trong hàng đợi, tức
+  ///     72%). Nay xếp cùng 'LICH_THI' vào NHẮC LỊCH, khớp với máy chủ.
+  ///   • Mặc định cũ là PERSONAL, nghĩa là mọi nhóm tin LẠ đều bị dồn vào tab
+  ///     CÁ NHÂN — nơi lẽ ra chỉ chứa tin gửi đích danh. Máy chủ mặc định
+  ///     GENERAL; hai bên phải giống nhau, nếu không cùng một tin sẽ nằm ở hai
+  ///     tab khác nhau tuỳ lúc đó lấy từ mạng hay từ bộ nhớ máy.
   String _safeGetTabGroup(dynamic n) {
     if (n['TabGroup'] != null && n['TabGroup'].toString().isNotEmpty) {
       return n['TabGroup'].toString().toUpperCase();
     }
-    String loai = n['LoaiTin']?.toString().toUpperCase() ?? "";
-    if (['GENERAL', 'THONG_BAO', 'TIN_TUC', 'TIN_TRUONG'].contains(loai)) return 'GENERAL';
-    if (['LICH_TUAN', 'LICH_CONGTAC', 'LICH_HOC', 'DIEM', 'WORK'].contains(loai)) return 'WORK';
-    if (['CANH_BAO', 'LICH_THI', 'LICH_HOP', 'HUY_LICH', 'REMINDER'].contains(loai)) return 'REMINDER';
-    return 'PERSONAL';
+    final loai = n['LoaiTin']?.toString().toUpperCase() ?? "";
+
+    const nhacLich = [
+      'CANH_BAO', 'LICH_THI', 'THI', 'LICH_HOP', 'NHAC_HEN',
+      'HUY_LICH', 'HUY_LOP_LT', 'KHAN_CAP', 'REMINDER',
+    ];
+    const hocTap = [
+      'LICH_TUAN', 'DIEM', 'LICH_DAY', 'LICH_CONGTAC', 'LICH_HOC',
+      'LOP_HP', 'LOP_HC', 'WORK',
+    ];
+    const caNhan = ['PHAN_HOI', 'DUYET_DON', 'CA_NHAN', 'PERSONAL'];
+
+    if (nhacLich.contains(loai)) return 'REMINDER';
+    if (hocTap.contains(loai)) return 'WORK';
+    if (caNhan.contains(loai)) return 'PERSONAL';
+    return 'GENERAL';
   }
 
   // --- 3. QUẢN LÝ BADGE TRONG APP ---
@@ -557,24 +581,39 @@ onTap: () async {
     );
   }
 
+  /// Xoá một thông báo khỏi danh sách của người này.
+  ///
+  /// ⚠️ SỬA 19/08/2026: bản cũ CHỈ ghi vào SQLite, không hề báo máy chủ. Tin
+  /// biến mất ngay nhưng lần tải sau lại quay về — và người dùng phải xoá lại,
+  /// mãi không hết. Đổi điện thoại hay cài lại ứng dụng là tất cả trở lại.
+  ///
+  /// Đây đúng là lỗi đã gặp ở "đánh dấu đã đọc": hàm
+  /// [NotificationRepository.an] vốn làm đúng cả hai việc, nhưng màn hình này
+  /// không gọi nó mà tự ghi thẳng xuống SQLite.
   Future<void> _handleHideNotif(int id) async {
-    try {
-      // 1. Cập nhật trạng thái xuống SQLite
-      await DatabaseHelper.instance.deleteNotificationLocal(id);
+    // 1. Bỏ khỏi giao diện NGAY, không bắt người dùng chờ mạng
+    setState(() {
+      generalNotifs.removeWhere((item) => (item['ID'] ?? item['id']) == id);
+      workNotifs.removeWhere((item) => (item['ID'] ?? item['id']) == id);
+      reminderNotifs.removeWhere((item) => (item['ID'] ?? item['id']) == id);
+      personalNotifs.removeWhere((item) => (item['ID'] ?? item['id']) == id);
+    });
+    _calculateAndApplyBadges();
 
-      // 2. Xóa trên giao diện (Quét cả ID hoa và id thường)
-      setState(() {
-        generalNotifs.removeWhere((item) => (item['ID'] ?? item['id']) == id);
-        workNotifs.removeWhere((item) => (item['ID'] ?? item['id']) == id);
-        reminderNotifs.removeWhere((item) => (item['ID'] ?? item['id']) == id);
-        personalNotifs.removeWhere((item) => (item['ID'] ?? item['id']) == id);
-      });
-      
-      // 3. Tính lại chấm đỏ Badge
-      _calculateAndApplyBadges();
-      
-    } catch (e) {
-      debugPrint("❌ Lỗi xóa thông báo: $e");
+    // 2. Ghi vào máy rồi báo máy chủ — cả hai do kho dữ liệu lo
+    final mayChuDaNhan = await NotificationRepository.instance.an(id);
+    if (!mounted) return;
+
+    if (!mayChuDaNhan) {
+      // Nói thật: đã xoá trên máy này, nhưng thiết bị khác vẫn còn thấy
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Đã xoá trên máy này. Chưa đồng bộ được lên máy chủ, "
+              "tin có thể xuất hiện lại ở thiết bị khác."),
+          backgroundColor: Color(0xFF96631A),
+          duration: Duration(seconds: 4),
+        ),
+      );
     }
   }
 }

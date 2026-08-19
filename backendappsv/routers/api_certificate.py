@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/certificate", tags=["Certificate"])
 
 
 @router.get("/categories")
-async def get_categories():
+def get_categories():
     try:
         sql = """
             SELECT * FROM OPENQUERY([172.16.95.200], '
@@ -35,7 +35,7 @@ def clean_id(raw_id: str) -> str:
     return clean.replace("SV", "") if clean.startswith("SV") else clean
 
 @router.get("/student/{student_id}")
-async def get_student_certs(student_id: str, type_id: str = "ALL"):
+def get_student_certs(student_id: str, type_id: str = "ALL"):
     try:
         sid = clean_id(student_id)
         

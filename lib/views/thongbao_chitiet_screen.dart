@@ -67,9 +67,27 @@ class _ChiTietThongBaoScreenState extends State<ChiTietThongBaoScreen> {
   }
 
   // HÀM ĐÁNH DẤU ĐỌC ĐÃ ĐƯỢC LÀM AN TOÀN
+  /// Đúng khi đã báo máy chủ rồi — chặn gọi lại.
+  ///
+  /// ⚠️ SỬA 19/08/2026: hàm này được gọi từ BỐN chỗ trong màn này (khi mở, sau
+  /// khi tải xong nội dung, khi bấm nút quay lại, khi vuốt quay lại) cộng thêm
+  /// một chỗ ở màn danh sách. Điều kiện chặn cũ là `_notifData['IsRead'] == 1`,
+  /// nhưng cờ đó chỉ được đặt SAU lệnh chờ — các lời gọi bắn ra trước đó đều
+  /// lọt qua.
+  ///
+  /// Đo thực tế: mở MỘT thông báo sinh ra BA lần POST /api/mark-read. Với 15
+  /// nghìn sinh viên thì đó là gấp ba tải máy chủ cho một việc không cần lặp.
+  ///
+  /// Cờ này đặt NGAY, trước mọi lệnh chờ, nên lần gọi thứ hai quay ra ngay.
+  bool _daBaoDaDoc = false;
+
   Future<void> _markAsRead() async {
+    if (_daBaoDaDoc) return;
+
     final dynamic id = _notifData['id'] ?? _notifData['ID'];
-    if (id == null || _notifData['IsRead'] == 1) return; 
+    if (id == null || _notifData['IsRead'] == 1) return;
+
+    _daBaoDaDoc = true;
 
     try {
       // Sửa 18/08/2026 (Pha 1): dùng chung NotificationRepository — nơi duy

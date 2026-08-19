@@ -290,7 +290,7 @@ async def check_version():
 # 3. API ĐĂNG NHẬP FULL NAME
 # =======================================================    
 @app.get("/api/get_fullname/{username}")
-async def get_fullname(username: str):
+def get_fullname(username: str):
     identity_username = clean_student_id(username.strip())
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
@@ -346,8 +346,18 @@ app.add_middleware(SelectiveSecurityMiddleware)
 
 
 @app.post("/api/auth/refresh-ms-token")
-async def refresh_ms_token(request: Request):
-    data = await request.json()
+def refresh_ms_token(data: dict):
+    # ⚠️ SỬA 19/08/2026: đổi từ `async def` sang `def`, và nhận thân yêu cầu
+    # qua tham số thay vì `await request.json()`.
+    #
+    # Mọi truy vấn ở đây dùng pyodbc — thư viện ĐỒNG BỘ. Đặt chúng trong một
+    # hàm `async def` nghĩa là chúng chạy thẳng trên vòng lặp sự kiện: một truy
+    # vấn chậm chặn TOÀN BỘ máy chủ, không riêng người gọi. Đã gặp thật ngày
+    # 19/08/2026 — máy chủ ngừng phục vụ hoàn toàn dù mạng tới cơ sở dữ liệu
+    # vẫn thông.
+    #
+    # Với hàm `def` thường, FastAPI tự chạy nó trong luồng riêng, nên truy vấn
+    # chậm chỉ ảnh hưởng đúng yêu cầu đó.
     user_code = data.get("user_code") 
 
     if not user_code:
@@ -614,7 +624,7 @@ async def auth_callback(request: Request):
 
 
 @app.post("/api/auth/verify-session")
-async def verify_session(data: dict = Body(...)):
+def verify_session(data: dict = Body(...)):
     # 1. Lấy Session Token từ App
     token = data.get("session_token")
     if not token:
@@ -963,7 +973,7 @@ async def login_success_page(user_id: str, name: str, role: str):
 # 7. API GỬI THÔNG BÁO (CÁN BỘ)
 # =======================================================
 @app.post("/api/admin/send-personal-notification")
-async def send_personal_notification(data: NotificationRequest):
+def send_personal_notification(data: NotificationRequest):
     try:
         # 1. Làm sạch ID sinh viên nhận (Vẫn giữ nguyên để khớp DB sinh viên)
         recipient_id = str(data.student_id).strip().upper().replace("SV", "").replace("CB", "")
@@ -1096,7 +1106,7 @@ async def login_face_pro(photo_front: UploadFile = File(...)):
 # =======================================================
 
 @app.get("/api/get-filters/{student_id}")
-async def api_get_filters(student_id: str):
+def api_get_filters(student_id: str):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -1117,7 +1127,7 @@ async def api_get_filters(student_id: str):
     except: return []
 
 @app.get("/api/get-schedule/{student_id}")
-async def api_get_schedule(
+def api_get_schedule(
     student_id: str, 
     nam_hoc: str = Query(None), 
     hoc_ky: str = Query(None), 
@@ -1193,7 +1203,7 @@ async def api_get_schedule(
         return []
 
 @app.get("/api/get-exams/{student_id}")
-async def api_get_exams(
+def api_get_exams(
     student_id: str, 
     nam_hoc: str = Query(None), 
     hoc_ky: str = Query(None),
@@ -1282,7 +1292,7 @@ async def api_get_exams(
         return []
 
 @app.get("/api/get-grades/{student_id}")
-async def api_get_grades(
+def api_get_grades(
     student_id: str, 
     nam_hoc: str = Query(None), 
     hoc_ky: str = Query(None),
@@ -1361,7 +1371,7 @@ async def api_get_grades(
         return []
 
 @app.post("/api/change-password")
-async def api_change_password(data: ChangePassRequest):
+def api_change_password(data: ChangePassRequest):
     try:
         sid = clean_student_id(data.student_id)
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
@@ -1383,7 +1393,7 @@ DEFAULT_AVATAR = "image/logo.png"
 # 🔥 THỐNG NHẤT: Dùng gạch ngang (-) cho tất cả các route avatar
 @app.get("/api/get-avatar/{student_id}") # Kiểu 1: /api/get-avatar/1679
 @app.get("/api/get-avatar/")            # Kiểu 2: /api/get-avatar/?student_id=1679
-async def get_student_avatar(student_id: str = None, v: str = None):
+def get_student_avatar(student_id: str = None, v: str = None):
     """
     Hàm lấy avatar thống nhất dùng dấu gạch ngang.
     Nhận student_id từ đường dẫn hoặc query parameter.
@@ -1609,7 +1619,7 @@ async def get_privacy_policy(request: Request):
         # return {"status": "error", "unread_count": 0}
 
 @app.get("/api/get-name-by-id/{user_id}") # Dùng @app nếu trong main.py
-async def get_name_by_id(user_id: str):
+def get_name_by_id(user_id: str):
     """
     API lấy tên người dùng: 
     1. Tự động cắt tiền tố SV, CB
@@ -1727,7 +1737,7 @@ import pyodbc
 
 #@app.post("/api/get-token")
 @app.get("/api/get-token")
-async def get_token_by_hsid(hsid: Optional[str] = Query(None)): 
+def get_token_by_hsid(hsid: Optional[str] = Query(None)): 
     # 1. Kiểm tra tham số đầu vào
     if hsid is None:
         return {"status": "error", "message": "Thiếu tham số hsid"}

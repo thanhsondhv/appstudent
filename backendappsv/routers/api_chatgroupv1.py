@@ -348,7 +348,7 @@ def api_add_members(payload: dict = Body(...)):
 # XEM THÀNH VIÊN
 
 @router.get("/members/{group_id}")
-async def get_group_members(group_id: str):
+def get_group_members(group_id: str):
     """Lấy danh sách thành viên kèm thông tin chi tiết và quyền hạn"""
     try:
         # 🔥 ĐÃ SỬA: Gọi hàm get_db_conn() từ file database.py

@@ -242,7 +242,7 @@ def verify_aspnet_v3(hashed_pass, raw_pass):
 # routers/api_chat_secure.py
 
 @router.get("/admin/search-user")
-async def search_user(q: str = None, ids: str = None, role: str = "ALL"):
+def search_user(q: str = None, ids: str = None, role: str = "ALL"):
     """
     Hàm lai: 
     - Nếu truyền 'ids': Trả về chính xác danh sách tên theo ID (Dùng cho load nhanh thành viên)
@@ -285,9 +285,19 @@ async def search_user(q: str = None, ids: str = None, role: str = "ALL"):
 
 
 @router.post("/save-fcm-token")
-async def save_fcm_token(request: Request):
+def save_fcm_token(data: dict):
+    # ⚠️ SỬA 19/08/2026: đổi từ `async def` sang `def`, và nhận thân yêu cầu
+    # qua tham số thay vì `await request.json()`.
+    #
+    # Mọi truy vấn ở đây dùng pyodbc — thư viện ĐỒNG BỘ. Đặt chúng trong một
+    # hàm `async def` nghĩa là chúng chạy thẳng trên vòng lặp sự kiện: một truy
+    # vấn chậm chặn TOÀN BỘ máy chủ, không riêng người gọi. Đã gặp thật ngày
+    # 19/08/2026 — máy chủ ngừng phục vụ hoàn toàn dù mạng tới cơ sở dữ liệu
+    # vẫn thông.
+    #
+    # Với hàm `def` thường, FastAPI tự chạy nó trong luồng riêng, nên truy vấn
+    # chậm chỉ ảnh hưởng đúng yêu cầu đó.
     try:
-        data = await request.json()
         student_id = data.get("student_id") or data.get("user_code")
         token = data.get("token")
         device_name = data.get("device_name", "Unknown Device")
@@ -353,7 +363,7 @@ class ChangePassRequest(BaseModel):
     new_pass: str
 
 @router.post("/change-password")
-async def change_password(data: ChangePassRequest):
+def change_password(data: ChangePassRequest):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -386,7 +396,7 @@ def generate_clean_group_id(id1, id2):
 
 # --- 1. API LẤY LỊCH SỬ CHAT (ĐÃ FIX LOGIC GROUPID) ---
 @router.get("/lecturer/chat-history")
-async def get_chat_history(sender_id: str, target_id: str, current_staff = Depends(verify_staff_token)):
+def get_chat_history(sender_id: str, target_id: str, current_staff = Depends(verify_staff_token)):
     # 🔥 SỬ DỤNG HÀM LÀM SẠCH ĐỂ KHỚP VỚI LÚC LƯU
     group_id = generate_clean_group_id(sender_id, target_id)
     
@@ -416,7 +426,7 @@ async def get_chat_history(sender_id: str, target_id: str, current_staff = Depen
 
 # --- 2. API GỬI TIN CÁ NHÂN (ĐÃ CHUẨN HÓA LƯU TRỮ) ---
 @router.post("/admin/send-notification-individual")
-async def send_notification_individual(data: dict, current_staff = Depends(verify_staff_token)):
+def send_notification_individual(data: dict, current_staff = Depends(verify_staff_token)):
     try:
         sender_id = current_staff['user_code'] # ID từ Token Matrix
         sender_name = current_staff['full_name']
@@ -467,7 +477,7 @@ async def send_notification_individual(data: dict, current_staff = Depends(verif
         return {"status": "error", "message": str(e)}
 
 @router.post("/admin/send-notification-lophc", dependencies=[Depends(verify_staff_token)])
-async def send_notification_lophc(data: dict):
+def send_notification_lophc(data: dict):
     try:
         title = data.get("title")
         content = data.get("content")
@@ -517,7 +527,7 @@ async def send_notification_lophc(data: dict):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 @router.post("/admin/send-notification-lhp", dependencies=[Depends(verify_staff_token)])
-async def send_notification_lhp(data: dict):
+def send_notification_lhp(data: dict):
     try:
         title = data.get("title")
         content = data.get("content")
@@ -567,7 +577,7 @@ async def send_notification_lhp(data: dict):
         return {"status": "error", "message": f"Lỗi Server: {str(e)}"}     
         
 @router.get("/get-notifs/{student_id}")
-async def api_get_notifs(student_id: str, page: int = 1,
+def api_get_notifs(student_id: str, page: int = 1,
                          me: Optional[Identity] = Depends(danh_tinh_neu_co)):
     student_id = _ma_duoc_phep_mem(student_id, me, "get-notifs")
     page_size = 20
@@ -609,8 +619,14 @@ async def api_get_notifs(student_id: str, page: int = 1,
                         
                         ISNULL(q.Sender, N'Hệ thống') as NguoiDang,
                         UPPER(ISNULL(q.Category, 'GENERAL')) as LoaiTin,
+                        -- ⚠️ SỬA 19/08/2026: nhóm 'THI' bị bỏ sót khỏi mọi danh
+                        -- sách, nên rơi vào nhánh ELSE và dồn hết về tab VINHUNI.
+                        -- Đếm trên dữ liệu thật: 336/471 tin trong hàng đợi là
+                        -- nhóm 'THI' — tức 72%. Người dùng mở tab NHẮC LỊCH thấy
+                        -- trống trong khi tin về thi cử nằm lẫn ở tab tin chung.
+                        -- Xếp cùng chỗ với 'LICH_THI' vốn đã có sẵn.
                         CASE 
-                            WHEN q.Category IN ('CANH_BAO', 'LICH_THI', 'LICH_HOP', 'NHAC_HEN', 'HUY_LICH', 'HUY_LOP_LT', 'KHAN_CAP') THEN 'REMINDER'
+                            WHEN q.Category IN ('CANH_BAO', 'LICH_THI', 'THI', 'LICH_HOP', 'NHAC_HEN', 'HUY_LICH', 'HUY_LOP_LT', 'KHAN_CAP') THEN 'REMINDER'
                             WHEN q.Category IN ('LICH_TUAN', 'DIEM', 'LICH_DAY', 'LICH_CONGTAC', 'LICH_HOC', 'LOP_HP', 'LOP_HC') THEN 'WORK'
                             WHEN q.Category IN ('PHAN_HOI', 'DUYET_DON', 'CA_NHAN') THEN 'PERSONAL'
                             ELSE 'GENERAL'
@@ -1011,7 +1027,7 @@ async def api_get_notifs(student_id: str, page: int = 1,
         # print(f"🔥 Lỗi API Get Notifs: {str(e)}")
         # return []
 @router.get("/count-unread/{student_id}")
-async def count_unread(student_id: str,
+def count_unread(student_id: str,
                        me: Optional[Identity] = Depends(danh_tinh_neu_co)):
     student_id = _ma_duoc_phep_mem(student_id, me, "count-unread")
     try:
@@ -1020,34 +1036,75 @@ async def count_unread(student_id: str,
         
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
-            # Logic: Tìm tin có tên mình trong danh sách nhận NHƯNG chưa nằm trong bảng Log Đã đọc
-            sql = """
-                SELECT COUNT(*) FROM tbl_Notification_Queue q
-                WHERE (
-                    REPLACE(REPLACE(q.StudentId, 'SV', ''), 'CB', '') = ? 
-                    OR q.IdNguoiHocs LIKE '%' + ? + '%' 
-                    OR q.IdNguoiHocs = 'ALL'
+
+            dk_queue = DIEU_KIEN_NGUOI_NHAN_QUEUE
+            dk_thongbao = _dieu_kien_nguoi_nhan_thongbao(cursor)
+            ts_queue = _tham_so_queue(sid_clean)
+            ts_thongbao = _tham_so_thongbao(cursor, sid_clean)
+
+            # ⚠️ SỬA 19/08/2026: bản cũ CHỈ đếm tin từ tbl_Notification_Queue,
+            # bỏ hẳn nguồn tbl_ThongBao — trong khi danh sách (get-notifs) lấy
+            # từ CẢ HAI.
+            #
+            # Đo trên tài khoản thật: máy chủ báo 0 tin chưa đọc trong khi ứng
+            # dụng hiển thị 13. Người dùng thấy hai con số đá nhau và không biết
+            # tin nào đúng.
+            #
+            # Nay đếm cả hai nguồn, dùng đúng điều kiện người nhận mà get-notifs
+            # dùng — hai chỗ phải trả lời cùng một câu hỏi thì phải hỏi giống nhau.
+            sql = f"""
+                SELECT
+                (
+                    SELECT COUNT(*) FROM tbl_Notification_Queue q
+                    WHERE (
+                        REPLACE(REPLACE(q.StudentId, 'SV', ''), 'CB', '') = ?
+                        OR {dk_queue}
+                        OR q.StudentId = 'ALL'
+                    )
+                    AND q.IsSent = 1
+                    AND ISNULL(q.Category, '') <> 'CHAT_GROUP'
+                    AND ISNULL(q.Scope, '') <> 'CHAT_PUSH_ONLY'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM tbl_Notification_Log_Detail d
+                        WHERE d.QueueId = q.ID
+                          AND REPLACE(REPLACE(d.StudentId, 'SV', ''), 'CB', '') = ?
+                          AND d.IsRead = 1
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM tbl_Notification_Read_Status s
+                        WHERE s.NotifID = q.ID
+                          AND REPLACE(REPLACE(s.StudentId, 'SV', ''), 'CB', '') = ?
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM tbl_Notification_Hides h
+                        WHERE h.NotifID = q.ID AND h.StudentId = ?
+                    )
                 )
-                AND q.IsSent = 1
-                -- Kiểm tra: Tin này chưa nằm trong Log chi tiết của người này
-                AND NOT EXISTS (
-                    SELECT 1 FROM tbl_Notification_Log_Detail d 
-                    WHERE d.QueueId = q.ID AND REPLACE(REPLACE(d.StudentId, 'SV', ''), 'CB', '') = ? AND d.IsRead = 1
-                )
-                -- Kiểm tra: Tin này chưa nằm trong bảng trạng thái đọc tin chung
-                AND NOT EXISTS (
-                    SELECT 1 FROM tbl_Notification_Read_Status s 
-                    WHERE s.NotifID = q.ID AND REPLACE(REPLACE(s.StudentId, 'SV', ''), 'CB', '') = ?
-                )
+                +
+                (
+                    SELECT COUNT(*) FROM tbl_ThongBao t
+                    WHERE t.IsDeleted = 0
+                    AND ({dk_thongbao} OR t.IdLoaiThongBao = 2)
+                    AND NOT EXISTS (
+                        SELECT 1 FROM tbl_Notification_Read_Status s
+                        WHERE s.NotifID = t.Id
+                          AND REPLACE(REPLACE(s.StudentId, 'SV', ''), 'CB', '') = ?
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM tbl_Notification_Hides h
+                        WHERE h.NotifID = t.Id AND h.StudentId = ?
+                    )
+                ) AS SoChuaDoc
             """
-            cursor.execute(sql, (sid_clean, sid_clean, sid_clean, sid_clean))
+            cursor.execute(sql, (sid_clean, ts_queue, sid_clean, sid_clean, sid_clean,
+                                 ts_thongbao, sid_clean, sid_clean))
             count = cursor.fetchone()[0]
             return {"status": "success", "unread_count": count}
     except Exception as e:
         print(f"🔥 Error Count Unread: {e}")
         return {"status": "error", "unread_count": 0}
 @router.get("/get-notif-detail/{notif_id}")
-async def get_notif_detail(notif_id: int, type: str = None):
+def get_notif_detail(notif_id: int, type: str = None):
     try:
         with pyodbc.connect(REMOTE_CONN_STR, autocommit=True) as conn:
             cursor = conn.cursor()
@@ -1183,7 +1240,7 @@ else:
 
 
 @router.get("/docs/search")
-async def search_documents(
+def search_documents(
     query: str = "", 
     is_ai: int = 0, 
     category: Optional[str] = None, 
@@ -1342,10 +1399,20 @@ async def search_documents(
         # print(f"🔥 Lỗi khi ẩn tin: {str(e)}")
         # return JSONResponse(status_code=500, content={"message": str(e)})
 @router.post("/hide-notif/{notif_id}") 
-async def api_hide_notif(notif_id: int, request: Request,
-                         me: Optional[Identity] = Depends(danh_tinh_neu_co)):
+def api_hide_notif(notif_id: int, data: dict,
+                   me: Optional[Identity] = Depends(danh_tinh_neu_co)):
+    # ⚠️ SỬA 19/08/2026: đổi từ `async def` sang `def`, và nhận thân yêu cầu
+    # qua tham số thay vì `await request.json()`.
+    #
+    # Mọi truy vấn ở đây dùng pyodbc — thư viện ĐỒNG BỘ. Đặt chúng trong một
+    # hàm `async def` nghĩa là chúng chạy thẳng trên vòng lặp sự kiện: một truy
+    # vấn chậm chặn TOÀN BỘ máy chủ, không riêng người gọi. Đã gặp thật ngày
+    # 19/08/2026 — máy chủ ngừng phục vụ hoàn toàn dù mạng tới cơ sở dữ liệu
+    # vẫn thông.
+    #
+    # Với hàm `def` thường, FastAPI tự chạy nó trong luồng riêng, nên truy vấn
+    # chậm chỉ ảnh hưởng đúng yêu cầu đó.
     try:
-        data = await request.json()
         student_id = data.get("student_id")
         if not student_id:
             return JSONResponse(status_code=400, content={"message": "Thiếu student_id"})
@@ -1372,10 +1439,20 @@ async def api_hide_notif(notif_id: int, request: Request,
     except Exception as e:
         return JSONResponse(status_code=500, content={"message": str(e)})        
 @router.post("/mark-read/{notif_id}")
-async def mark_read(notif_id: int, request: Request,
-                    me: Optional[Identity] = Depends(danh_tinh_neu_co)):
+def mark_read(notif_id: int, data: dict,
+              me: Optional[Identity] = Depends(danh_tinh_neu_co)):
+    # ⚠️ SỬA 19/08/2026: đổi từ `async def` sang `def`, và nhận thân yêu cầu
+    # qua tham số thay vì `await request.json()`.
+    #
+    # Mọi truy vấn ở đây dùng pyodbc — thư viện ĐỒNG BỘ. Đặt chúng trong một
+    # hàm `async def` nghĩa là chúng chạy thẳng trên vòng lặp sự kiện: một truy
+    # vấn chậm chặn TOÀN BỘ máy chủ, không riêng người gọi. Đã gặp thật ngày
+    # 19/08/2026 — máy chủ ngừng phục vụ hoàn toàn dù mạng tới cơ sở dữ liệu
+    # vẫn thông.
+    #
+    # Với hàm `def` thường, FastAPI tự chạy nó trong luồng riêng, nên truy vấn
+    # chậm chỉ ảnh hưởng đúng yêu cầu đó.
     try:
-        data = await request.json()
         student_id = data.get("student_id")
         sid_clean = _ma_duoc_phep_mem(student_id, me, "mark-read")
 
@@ -1405,7 +1482,7 @@ async def mark_read(notif_id: int, request: Request,
 
 
 @router.post("/mark-all-read/{student_id}")
-async def mark_all_read(student_id: str,
+def mark_all_read(student_id: str,
                         me: Optional[Identity] = Depends(danh_tinh_neu_co)):
     """Đánh dấu toàn bộ thông báo của một người là đã đọc.
 
@@ -1604,7 +1681,7 @@ async def mark_all_read(student_id: str,
         # print(f"🔥 Lỗi API notification-report: {e}")
         # return {"status": "error", "message": str(e)}  
 @router.get("/lecturer/notification-report/{queue_id}")
-async def get_notification_report(queue_id: int):
+def get_notification_report(queue_id: int):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -1674,7 +1751,7 @@ async def get_notification_report(queue_id: int):
         # print(f"🔥 Lỗi sent-history: {e}")
         # return {"status": "error", "message": str(e)}
 @router.get("/lecturer/sent-history/{sender_id}")
-async def get_sent_history(sender_id: str):
+def get_sent_history(sender_id: str):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -1710,7 +1787,7 @@ async def get_sent_history(sender_id: str):
         return {"status": "error", "message": str(e)}
 # Đảm bảo hàm tiếp theo cũng phải thẳng hàng như vậy
 @router.get("/lecturer/notification-report/{queue_id}")
-async def get_notification_report(queue_id: int):
+def get_notification_report(queue_id: int):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -1738,7 +1815,7 @@ async def get_notification_report(queue_id: int):
         return {"status": "error", "message": str(e)}     
 # 1. Check nhiều SV cùng lúc từ chuỗi dấu phẩy
 @router.get("/lecturer/check-multiple-users")
-async def check_multiple_users(q: str):
+def check_multiple_users(q: str):
     try:
         # Tách chuỗi: "2157..., 2158..." -> ['2157...', '2158...']
         raw_ids = [i.strip().upper().replace("SV", "") for i in q.split(",") if i.strip()]
@@ -1758,13 +1835,13 @@ async def check_multiple_users(q: str):
 
 # 2. Lấy danh sách nhóm ảo của GV
 @router.get("/lecturer/custom-groups/{sender_id}")
-async def get_custom_groups(sender_id: str):
+def get_custom_groups(sender_id: str):
     with pyodbc.connect(REMOTE_CONN_STR) as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT GroupId, GroupName FROM tbl_Notification_CustomGroups WHERE CreatorId = ?", (sender_id,))
         return {"status": "success", "data": [{"id": r[0], "name": r[1]} for r in cursor.fetchall()]}        
 @router.post("/lecturer/create-custom-group")
-async def create_custom_group(data: dict):
+def create_custom_group(data: dict):
     # data: { "group_name": "Nhóm ôn thi", "sender_id": "CB123", "student_ids": "SV01,SV02" }
     try:
         group_name = data.get("group_name")
@@ -1791,7 +1868,7 @@ async def create_custom_group(data: dict):
         return {"status": "error", "message": str(e)}   
 # API Xóa nhóm ảo
 @router.delete("/lecturer/delete-custom-group/{group_id}")
-async def delete_custom_group(group_id: int):
+def delete_custom_group(group_id: int):
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
             cursor = conn.cursor()
@@ -1803,7 +1880,7 @@ async def delete_custom_group(group_id: int):
 
 # API Lấy chi tiết thành viên (Dùng cho cả sửa nhóm và lịch sử)
 @router.get("/lecturer/custom-group-members/{group_id}")
-async def get_custom_group_members(group_id: int):
+def get_custom_group_members(group_id: int):
     with pyodbc.connect(REMOTE_CONN_STR) as conn:
         cursor = conn.cursor()
         sql = """
@@ -1817,7 +1894,7 @@ async def get_custom_group_members(group_id: int):
 
 #================Lơp hanh chính===============        
 @router.get("/lecturer/admin-classes/{sender_id}", dependencies=[Depends(verify_staff_token)])
-async def get_admin_classes(sender_id: str):
+def get_admin_classes(sender_id: str):
     try:
         # Mặc dù không lọc theo sender_id nữa, nhưng ta vẫn giữ để log hoặc mở rộng sau này
         
@@ -1860,7 +1937,7 @@ async def get_admin_classes(sender_id: str):
 
 # 1. API cho Sinh viên: Lấy danh sách lớp đang học để chọn xin phép
 @router.get("/student/my-classes/{student_id}")
-async def get_student_classes(student_id: str, me: Identity = Depends(get_current_user)):
+def get_student_classes(student_id: str, me: Identity = Depends(get_current_user)):
     """Danh sách lớp học phần của một sinh viên.
 
     SỬA 18/08/2026 — hai lỗi ở bản cũ:
@@ -1964,7 +2041,7 @@ async def get_student_classes(student_id: str, me: Identity = Depends(get_curren
             # content={"status": "error", "message": f"Lỗi hệ thống: {str(e)}"}
         # )
 @router.post("/student/send-attendance-request")
-async def send_attendance_request(data: dict, me: Identity = Depends(get_current_user)):
+def send_attendance_request(data: dict, me: Identity = Depends(get_current_user)):
     """Gửi đơn xin phép nghỉ học.
 
     SỬA 18/08/2026: bản cũ lấy student_id từ nội dung máy khách gửi lên, nên
@@ -2026,7 +2103,7 @@ async def send_attendance_request(data: dict, me: Identity = Depends(get_current
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 # 3. API cho Giảng viên: Nhận tin nhắn từ SV (Tab TIN TỪ SV)
 @router.get("/lecturer/student-messages/{lecturer_id}")
-async def get_student_messages(lecturer_id: str):
+def get_student_messages(lecturer_id: str):
     clean_id = lecturer_id.replace("CB", "").strip()
     try:
         with pyodbc.connect(REMOTE_CONN_STR) as conn:
@@ -2063,7 +2140,7 @@ async def get_student_messages(lecturer_id: str):
 
 
 @router.post("/lecturer/update-attendance-status")
-async def update_attendance_status(data: dict):
+def update_attendance_status(data: dict):
     try:
         # 1. Lấy dữ liệu từ App gửi lên
         req_id = data.get("request_id")
@@ -2166,7 +2243,7 @@ async def update_attendance_status(data: dict):
         return {"status": "error", "message": str(e)}      
 # ham lay lich su don vang hoc
 @router.get("/student/attendance-history/{student_id}")
-async def get_attendance_history(student_id: str, me: Identity = Depends(get_current_user)):
+def get_attendance_history(student_id: str, me: Identity = Depends(get_current_user)):
     """Lịch sử đơn xin phép của một sinh viên.
 
     SỬA 18/08/2026: bản cũ không kiểm tra gì — mã sinh viên lấy thẳng từ đường
