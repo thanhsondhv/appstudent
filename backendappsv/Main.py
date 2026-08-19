@@ -55,6 +55,7 @@ from routers import api_chatgroupv1
 
 #from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.concurrency import run_in_threadpool  # chạy mã đồng bộ ngoài vòng lặp sự kiện
 import pyodbc
 from fastapi import Depends, HTTPException, Header, status
 from firebase_admin import auth, credentials
@@ -792,121 +793,140 @@ async def api_login(data: LoginRequest, request: Request):
                 return JSONResponse(status_code=401, content={"status": "error", "message": "Tài khoản hoặc mật khẩu không đúng"})
 
             # Lấy Profile từ Local DB để xác định Role và thông tin cá nhân
-            with pyodbc.connect(REMOTE_CONN_STR) as conn:
-                cursor = conn.cursor()
-                sql_profile = """
-                    SELECT RTRIM(UserCode), FullName, UserType, RTRIM(UserRole), 
-                           FacultyName, DepartmentName, RTRIM(UserName)
-                    FROM tbl_Users 
-                    WHERE RTRIM(UserName) = ? OR RTRIM(UserCode) = ? OR RTRIM(UserCode) = 'SV' + ?
-                """
-                cursor.execute(sql_profile, (identity_username, identity_username, identity_username))
-                profile = cursor.fetchone()
-
-                if not profile:
-                    return JSONResponse(status_code=403, content={"status": "error", "message": "Hồ sơ chưa đồng bộ."})
-
-                db_user_code = str(profile[0]).strip()
-                db_role_raw = str(profile[3] or "").strip()
-                user_type = profile[2]
-
-                # --- LOGIC PHÂN QUYỀN CHUẨN ---
-                if db_role_raw == "CanBo" or db_user_code.startswith("CB") or user_type == 1:
-                    final_role = "CanBo"
-                else:
-                    final_role = "SinhVien"
-
-                # 🔥 TẠO JWT ACCESS TOKEN CHO HỆ THỐNG
-                system_access_token = create_access_token(user_id=db_user_code, role=final_role, method="Password")
-
-                # 🛡️ BƯỚC MỚI: LƯU TOKEN VÀO DATABASE ĐỂ MIDDLEWARE KIỂM TRA
-                cursor.execute("UPDATE tbl_Users SET SessionToken = ? WHERE UserCode = ?", (system_access_token, db_user_code))
-                conn.commit()
-
-                # Tạo Chat Token (Firebase)
-                try: chat_token = auth.create_custom_token(db_user_code).decode('utf-8')
-                except: chat_token = ""
-
-                user_data = {
-                    "student_id": db_user_code,
-                    "user_code": db_user_code,
-                    "user_name": str(profile[6] or "").strip() or identity_username,
-                    "full_name": profile[1],
-                    "user_role": final_role,
-                    "role": final_role,
-                    "faculty": profile[4],
-                    "department": profile[5],
-                    "access_token": system_access_token, # Gửi Token này cho App
-                    "firebase_chat_token": chat_token
-                }
-                
-                print(f"🎉 SINH VIÊN OK: {user_data['full_name']} | SessionToken đã lưu.")
-                
-                return {"status": "success", "message": "Đăng nhập thành công", "data": user_data}
-
-        else:
-            # =================================================================
-            # LUỒNG CÁN BỘ (XÁC THỰC SQL SERVER .26)
-            # =================================================================
-            STAFF_DB_CONN = settings.staff_db.conn_str
-            
-            with pyodbc.connect(STAFF_DB_CONN) as conn:
-                cursor = conn.cursor()
-                sql_info = "SELECT HS_ID, HS_TruyCap_MatKhau_Khoa, (HS_Ho + ' ' + HS_Ten) FROM tbl_CANBO_HoSo WHERE HS_TruyCap_TenDangNhap = ?"
-                cursor.execute(sql_info, (raw_username,))
-                row = cursor.fetchone()
-
-                if not row:
-                    return JSONResponse(status_code=401, content={"status": "error", "message": "Tài khoản không tồn tại"})
-
-                hs_id, n_iter, full_name = row[0], int(row[1]) if row[1] else 0, row[2]
-                hashed_pw = get_md5_pass_n_times(password, n_iter)
-
-                cursor.execute("SELECT HS_ID FROM tbl_CANBO_HoSo WHERE HS_ID = ? AND HS_TruyCap_MatKhau = ?", (hs_id, hashed_pw))
-                if not cursor.fetchone():
-                    return JSONResponse(status_code=401, content={"status": "error", "message": "Sai mật khẩu"})
-
-                user_code_mapped = f"CB{str(hs_id).strip()}"
-
-                # Lấy Profile chi tiết từ DB cục bộ
-                with pyodbc.connect(REMOTE_CONN_STR) as conn_local:
-                    cursor_local = conn_local.cursor()
-                    cursor_local.execute("""
+            # ⚠️ SỬA 19/08/2026: phần truy vấn được đẩy sang LUỒNG RIÊNG.
+            #
+            # pyodbc là thư viện đồng bộ. Gọi nó thẳng trong `async def` nghĩa là
+            # nó chạy trên vòng lặp sự kiện, và một truy vấn chậm chặn TOÀN BỘ
+            # máy chủ — không riêng người đang đăng nhập. Đã gặp thật hôm nay:
+            # máy chủ ngừng phục vụ hoàn toàn dù mạng tới cơ sở dữ liệu vẫn thông.
+            #
+            # Đây là endpoint MỌI sinh viên đều đi qua, nên cũng là chỗ nguy hiểm
+            # nhất nếu để nghẽn.
+            #
+            # Nội dung bên trong giữ nguyên từng dòng, chỉ lùi vào một cấp.
+            def _lay_ho_so_sinh_vien():
+                with pyodbc.connect(REMOTE_CONN_STR) as conn:
+                    cursor = conn.cursor()
+                    sql_profile = """
                         SELECT RTRIM(UserCode), FullName, UserType, RTRIM(UserRole), 
                                FacultyName, DepartmentName, RTRIM(UserName)
-                        FROM tbl_Users WHERE LTRIM(RTRIM(UserCode)) = ?
-                    """, (user_code_mapped,))
-                    p = cursor_local.fetchone()
+                        FROM tbl_Users 
+                        WHERE RTRIM(UserName) = ? OR RTRIM(UserCode) = ? OR RTRIM(UserCode) = 'SV' + ?
+                    """
+                    cursor.execute(sql_profile, (identity_username, identity_username, identity_username))
+                    profile = cursor.fetchone()
 
-                    final_role = str(p[3] or "CanBo").strip() if p else "CanBo"
-                    
-                    # 🔥 TẠO JWT ACCESS TOKEN CHO CÁN BỘ
-                    system_access_token = create_access_token(user_id=user_code_mapped, role=final_role, method="Password")
+                    if not profile:
+                        return JSONResponse(status_code=403, content={"status": "error", "message": "Hồ sơ chưa đồng bộ."})
 
-                    # 🛡️ BƯỚC MỚI: LƯU TOKEN VÀO DATABASE CỤC BỘ ĐỂ MIDDLEWARE KIỂM TRA
-                    cursor_local.execute("UPDATE tbl_Users SET SessionToken = ? WHERE UserCode = ?", (system_access_token, user_code_mapped))
-                    conn_local.commit()
+                    db_user_code = str(profile[0]).strip()
+                    db_role_raw = str(profile[3] or "").strip()
+                    user_type = profile[2]
 
-                    try: chat_token = auth.create_custom_token(user_code_mapped).decode('utf-8')
+                    # --- LOGIC PHÂN QUYỀN CHUẨN ---
+                    if db_role_raw == "CanBo" or db_user_code.startswith("CB") or user_type == 1:
+                        final_role = "CanBo"
+                    else:
+                        final_role = "SinhVien"
+
+                    # 🔥 TẠO JWT ACCESS TOKEN CHO HỆ THỐNG
+                    system_access_token = create_access_token(user_id=db_user_code, role=final_role, method="Password")
+
+                    # 🛡️ BƯỚC MỚI: LƯU TOKEN VÀO DATABASE ĐỂ MIDDLEWARE KIỂM TRA
+                    cursor.execute("UPDATE tbl_Users SET SessionToken = ? WHERE UserCode = ?", (system_access_token, db_user_code))
+                    conn.commit()
+
+                    # Tạo Chat Token (Firebase)
+                    try: chat_token = auth.create_custom_token(db_user_code).decode('utf-8')
                     except: chat_token = ""
 
                     user_data = {
-                        "student_id": p[0] if p else user_code_mapped,
-                        "user_code": p[0] if p else user_code_mapped,
-                        "user_name": str(p[6] or "").strip() if (p and p[6]) else raw_username,
-                        "full_name": p[1] if p else full_name,
+                        "student_id": db_user_code,
+                        "user_code": db_user_code,
+                        "user_name": str(profile[6] or "").strip() or identity_username,
+                        "full_name": profile[1],
                         "user_role": final_role,
                         "role": final_role,
-                        "faculty": p[4] if (p and p[4]) else "Cán bộ",
-                        "department": p[5] if (p and p[5]) else "Trường Đại học Vinh",
-                        "access_token": system_access_token, # Token bảo mật thực tế
+                        "faculty": profile[4],
+                        "department": profile[5],
+                        "access_token": system_access_token, # Gửi Token này cho App
                         "firebase_chat_token": chat_token
                     }
-                    print("\n" + "🚀" * 5 + " MÃ VÀO CHAT (FIREBASE) " + "🚀" * 5)
-                    print(chat_token, flush=True)
-                    print("🚀" * 25 + "\n")
-                    print(f"🎉 CÁN BỘ OK: {user_data['full_name']} | Role: {final_role} | SessionToken đã lưu.")
-                    return {"status": "success", "data": user_data}
+                
+                    print(f"🎉 SINH VIÊN OK: {user_data['full_name']} | SessionToken đã lưu.")
+                
+                    return {"status": "success", "message": "Đăng nhập thành công", "data": user_data}
+
+            return await run_in_threadpool(_lay_ho_so_sinh_vien)
+
+        else:
+            # Nhánh cán bộ chỉ có truy vấn, không có await — đẩy sang
+            # luồng riêng vì lý do đã nói ở nhánh sinh viên.
+            def _dang_nhap_can_bo():
+                # =================================================================
+                # LUỒNG CÁN BỘ (XÁC THỰC SQL SERVER .26)
+                # =================================================================
+                STAFF_DB_CONN = settings.staff_db.conn_str
+            
+                with pyodbc.connect(STAFF_DB_CONN) as conn:
+                    cursor = conn.cursor()
+                    sql_info = "SELECT HS_ID, HS_TruyCap_MatKhau_Khoa, (HS_Ho + ' ' + HS_Ten) FROM tbl_CANBO_HoSo WHERE HS_TruyCap_TenDangNhap = ?"
+                    cursor.execute(sql_info, (raw_username,))
+                    row = cursor.fetchone()
+
+                    if not row:
+                        return JSONResponse(status_code=401, content={"status": "error", "message": "Tài khoản không tồn tại"})
+
+                    hs_id, n_iter, full_name = row[0], int(row[1]) if row[1] else 0, row[2]
+                    hashed_pw = get_md5_pass_n_times(password, n_iter)
+
+                    cursor.execute("SELECT HS_ID FROM tbl_CANBO_HoSo WHERE HS_ID = ? AND HS_TruyCap_MatKhau = ?", (hs_id, hashed_pw))
+                    if not cursor.fetchone():
+                        return JSONResponse(status_code=401, content={"status": "error", "message": "Sai mật khẩu"})
+
+                    user_code_mapped = f"CB{str(hs_id).strip()}"
+
+                    # Lấy Profile chi tiết từ DB cục bộ
+                    with pyodbc.connect(REMOTE_CONN_STR) as conn_local:
+                        cursor_local = conn_local.cursor()
+                        cursor_local.execute("""
+                            SELECT RTRIM(UserCode), FullName, UserType, RTRIM(UserRole), 
+                                   FacultyName, DepartmentName, RTRIM(UserName)
+                            FROM tbl_Users WHERE LTRIM(RTRIM(UserCode)) = ?
+                        """, (user_code_mapped,))
+                        p = cursor_local.fetchone()
+
+                        final_role = str(p[3] or "CanBo").strip() if p else "CanBo"
+                    
+                        # 🔥 TẠO JWT ACCESS TOKEN CHO CÁN BỘ
+                        system_access_token = create_access_token(user_id=user_code_mapped, role=final_role, method="Password")
+
+                        # 🛡️ BƯỚC MỚI: LƯU TOKEN VÀO DATABASE CỤC BỘ ĐỂ MIDDLEWARE KIỂM TRA
+                        cursor_local.execute("UPDATE tbl_Users SET SessionToken = ? WHERE UserCode = ?", (system_access_token, user_code_mapped))
+                        conn_local.commit()
+
+                        try: chat_token = auth.create_custom_token(user_code_mapped).decode('utf-8')
+                        except: chat_token = ""
+
+                        user_data = {
+                            "student_id": p[0] if p else user_code_mapped,
+                            "user_code": p[0] if p else user_code_mapped,
+                            "user_name": str(p[6] or "").strip() if (p and p[6]) else raw_username,
+                            "full_name": p[1] if p else full_name,
+                            "user_role": final_role,
+                            "role": final_role,
+                            "faculty": p[4] if (p and p[4]) else "Cán bộ",
+                            "department": p[5] if (p and p[5]) else "Trường Đại học Vinh",
+                            "access_token": system_access_token, # Token bảo mật thực tế
+                            "firebase_chat_token": chat_token
+                        }
+                        print("\n" + "🚀" * 5 + " MÃ VÀO CHAT (FIREBASE) " + "🚀" * 5)
+                        print(chat_token, flush=True)
+                        print("🚀" * 25 + "\n")
+                        print(f"🎉 CÁN BỘ OK: {user_data['full_name']} | Role: {final_role} | SessionToken đã lưu.")
+                        return {"status": "success", "data": user_data}
+
+            return await run_in_threadpool(_dang_nhap_can_bo)
 
     except Exception as e:
         print(f"🔥 LỖI LOGIN: {str(e)}")
